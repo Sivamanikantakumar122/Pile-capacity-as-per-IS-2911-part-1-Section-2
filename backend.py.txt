@@ -1,0 +1,274 @@
+import math
+import io
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+
+PHI_TABLE = [0, 5, 10, 15, 20, 25, 30, 35, 40]
+N_GAMMA_TABLE = [0, 0.45, 1.22, 2.65, 5.39, 10.88, 22.4, 48.03, 109.41]
+
+
+def get_n_gamma(phi: float) -> float:
+    """Interpolate N_gamma based on internal friction angle phi."""
+    if phi <= 0:
+        return 0.0
+    if phi >= 40:
+        return 109.41
+    return float(np.interp(phi, PHI_TABLE, N_GAMMA_TABLE))
+
+
+def calculate_pile_capacity(general_inputs: dict, layers: list):
+    """
+    Performs layer-by-layer pile capacity calculations per IS 2911 Part 1 Sec 2.
+    """
+    D = general_inputs['pile_diameter']
+    A_p = math.pi * (D ** 2) / 4.0
+    gw_depth = general_inputs['gw_depth']
+    gamma_conc = general_inputs['gamma_concrete']
+    fos = general_inputs['fos']
+
+    K_i = 1.0
+    N_c_default = 9.0
+
+    cumulative_Qs = 0.0
+    cumulative_weight = 0.0
+
+    output_rows = []
+    rock_inputs_list = []
+
+    for idx, layer in enumerate(layers):
+        depth_from = layer['from']
+        depth_to = layer['to']
+        thickness = abs(depth_to - depth_from)
+        strata = layer['strata']
+
+        # Effective Overburden Pressure (PDi)
+        gamma_sub = layer.get('submerged_unit_weight', 0.0)
+        PDi = gamma_sub * thickness
+
+        # Sand Strata
+        if strata == 'Sand':
+            phi = layer.get('phi', 0.0)
+            if phi < 30:
+                H_cr = 15.0 * D
+            elif phi > 40:
+                H_cr = 20.0 * D
+            else:
+                H_cr = 17.5 * D
+
+            PD_lim = gamma_sub * H_cr
+            PD = min(PDi, PD_lim)
+
+            N_gamma = get_n_gamma(phi)
+            N_q = 0.178 * math.exp(0.1609 * phi)
+            delta = math.radians(phi)
+            A_s = math.pi * D * thickness
+
+            unit_end_bearing = (0.5 * D * gamma_sub * N_gamma) + (PD * N_q)
+            Qb_layer = A_p * unit_end_bearing
+
+            unit_skin_friction = K_i * PD * math.tan(delta)
+            layer_Qs = unit_skin_friction * A_s
+            cumulative_Qs += layer_Qs
+
+        # Clay Strata
+        elif strata == 'Clay':
+            Cu = layer.get('Cu', 0.0)
+            PD = PDi
+
+            if Cu < 40:
+                alpha = 1.0
+            elif 40 <= Cu <= 200:
+                alpha = 0.23 + 0.77 * math.exp(-0.023 * (Cu - 40))
+            else:
+                alpha = 0.23
+
+            A_s = math.pi * D * thickness
+            unit_end_bearing = N_c_default * Cu
+            Qb_layer = A_p * unit_end_bearing
+
+            unit_skin_friction = alpha * Cu
+            layer_Qs = unit_skin_friction * A_s
+            cumulative_Qs += layer_Qs
+
+        # Rock Strata
+        else:
+            rock_type = layer.get('rock_type', 1)
+
+            # Socket length determination (1-2D for Opt 1, 2-3D for Opt 2, 3-4D for Opt 3)
+            if rock_type == 1:
+                desired_ls = 2.0 * D
+            elif rock_type == 2:
+                desired_ls = 3.0 * D
+            else:
+                desired_ls = 4.0 * D
+
+            ls = min(thickness, desired_ls)
+
+            if rock_type == 1:
+                ucs_mpa = layer.get('ucs_mpa', 0.0)
+                qc_ton_m2 = ucs_mpa * 101.97
+                spacing = layer.get('spacing_discontinuities', '>300')
+                if spacing == '>300':
+                    N_j = 0.4
+                elif spacing == '100-300':
+                    N_j = 0.25
+                else:
+                    N_j = 0.1
+
+                N_d = 0.8 + 0.2 * (ls / D)
+                alpha_r = 5.0 / math.sqrt(ucs_mpa) if ucs_mpa > 0 else 0
+
+                ed = layer.get('Ed', None)
+                ei = layer.get('Ei', None)
+                rqd = layer.get('rqd', 80)
+
+                if ed and ei and ei != 0:
+                    j_val = ed / ei
+                else:
+                    if rqd < 50:
+                        j_val = 0.2
+                    elif 50 <= rqd <= 75:
+                        j_val = 0.35
+                    elif 75 < rqd <= 90:
+                        j_val = 0.65
+                    else:
+                        j_val = 1.0
+
+                beta_r = j_val ** 0.45
+                Qu_rock_tons = (qc_ton_m2 * N_j * N_d * A_p) + (qc_ton_m2 * math.pi * D * ls * alpha_r * beta_r)
+                Qu_rock_MN = Qu_rock_tons * 0.00980665
+
+                Cu1_display = ucs_mpa
+                Cu2_display = ucs_mpa
+
+            else:  # Rock Option 2 & Option 3
+                # Cu1: UCS at the end/tip of socket length
+                # Cu2: Average UCS over socket length
+                Cu1 = layer.get('Cu1', layer.get('ucs_mpa', 0.0))
+                Cu2 = layer.get('Cu2', layer.get('ucs_mpa', 0.0))
+                
+                Nc = 9.0
+                alpha_rock = 0.9
+                
+                # Qu = Cu1 * Nc * pi() * D^2 / 4 + alpha * Cu2 * pi() * D * ls
+                Qu_rock_MN = (Cu1 * Nc * (math.pi * D ** 2 / 4.0)) + (alpha_rock * Cu2 * math.pi * D * ls)
+
+                Cu1_display = Cu1
+                Cu2_display = Cu2
+
+            Qa_rock_MN = Qu_rock_MN / fos
+
+            rock_inputs_list.append({
+                'Layer Index': idx + 1,
+                'Rock Type Option': rock_type,
+                'Cu1 - Base UCS (MPa)': Cu1_display,
+                'Cu2 - Avg UCS (MPa)': Cu2_display,
+                'Socket Length ls (m)': ls,
+                'Ultimate Capacity Qu (MN)': Qu_rock_MN,
+                'Allowable Capacity Qa (MN)': Qa_rock_MN
+            })
+
+            unit_end_bearing = Qu_rock_MN * 1000 / A_p if A_p else 0
+            Qb_layer = Qu_rock_MN * 1000
+            unit_skin_friction = 0
+
+        # Layer weight calculation
+        layer_weight = gamma_conc * A_p * thickness
+        cumulative_weight += layer_weight
+
+        # Ultimate & Allowable Capacities
+        Qu_comp_kN = cumulative_Qs + Qb_layer
+        Qu_comp_MN = Qu_comp_kN / 1000.0
+        Qa_comp_MN = Qu_comp_MN / fos
+
+        Qu_tens_kN = cumulative_weight + cumulative_Qs
+        Qu_tens_MN = Qu_tens_kN / 1000.0
+        Qa_tens_MN = Qu_tens_MN / fos
+
+        output_rows.append({
+            'Depth (m)': depth_to,
+            'Strata': strata,
+            'Unit Skin Friction (kPa)': unit_skin_friction,
+            'Skin Friction Qs (kN)': cumulative_Qs,
+            'Unit End Bearing (kPa)': unit_end_bearing,
+            'End Bearing Resistance Qb (kN)': Qb_layer,
+            'Ultimate Capacity Qu Comp (MN)': Qu_comp_MN,
+            'Allowable Capacity Qa Comp (MN)': Qa_comp_MN,
+            'Ultimate Capacity Qu Tens (MN)': Qu_tens_MN,
+            'Allowable Capacity Qa Tens (MN)': Qa_tens_MN
+        })
+
+    results_df = pd.DataFrame(output_rows)
+    rock_df = pd.DataFrame(rock_inputs_list) if rock_inputs_list else pd.DataFrame()
+
+    return results_df, rock_df
+
+
+def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.DataFrame, rock_df: pd.DataFrame) -> bytes:
+    """Generates multi-sheet Excel file in memory."""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        pd.DataFrame([general_inputs]).to_excel(writer, sheet_name='General Inputs', index=False)
+        pd.DataFrame(layers).to_excel(writer, sheet_name='Layer Inputs', index=False)
+        results_df.to_excel(writer, sheet_name='Results', index=False)
+        if not rock_df.empty:
+            rock_df.to_excel(writer, sheet_name='Rock Analysis', index=False)
+
+    return output.getvalue()
+
+
+def create_plots(results_df: pd.DataFrame):
+    """Generates Plotly graphical representations."""
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(
+        x=results_df['Unit Skin Friction (kPa)'],
+        y=results_df['Depth (m)'],
+        mode='lines+markers',
+        name='Unit Skin Friction'
+    ))
+    fig1.update_layout(
+        title='Unit Skin Friction vs Depth',
+        xaxis_title='Unit Skin Friction (kPa)',
+        yaxis_title='Depth (m)',
+        yaxis_autorange='reversed'
+    )
+
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(
+        x=results_df['End Bearing Resistance Qb (kN)'],
+        y=results_df['Depth (m)'],
+        mode='lines+markers',
+        name='End Bearing (Qb)',
+        line=dict(color='orange')
+    ))
+    fig2.update_layout(
+        title='Ultimate End Bearing Resistance vs Depth',
+        xaxis_title='Qb (kN)',
+        yaxis_title='Depth (m)',
+        yaxis_autorange='reversed'
+    )
+
+    fig3 = go.Figure()
+    fig3.add_trace(go.Scatter(
+        x=results_df['Ultimate Capacity Qu Comp (MN)'],
+        y=results_df['Depth (m)'],
+        mode='lines+markers',
+        name='Compression (Qu)',
+        line=dict(color='green')
+    ))
+    fig3.add_trace(go.Scatter(
+        x=results_df['Ultimate Capacity Qu Tens (MN)'],
+        y=results_df['Depth (m)'],
+        mode='lines+markers',
+        name='Tension (Qu)',
+        line=dict(color='red', dash='dash')
+    ))
+    fig3.update_layout(
+        title='Ultimate Pile Capacity vs Depth',
+        xaxis_title='Capacity (MN)',
+        yaxis_title='Depth (m)',
+        yaxis_autorange='reversed'
+    )
+
+    return fig1, fig2, fig3

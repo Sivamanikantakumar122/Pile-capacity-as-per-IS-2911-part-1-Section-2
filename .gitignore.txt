@@ -1,0 +1,20 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Output / temporary files
+*.xlsx
+*.csv
+
+# Streamlit secrets (if used later)
+.streamlit/secrets.toml
+
+# System files
+.DS_Store
+Thumbs.db
