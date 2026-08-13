@@ -3,48 +3,126 @@ import streamlit as st
 import pandas as pd
 from backend import calculate_pile_capacity, generate_excel_report, create_plots
 
+# --------------------------
+# PAGE CONFIG & CUSTOM CSS
+# --------------------------
 st.set_page_config(
     page_title="Pile Capacity Calculator - IS 2911",
+    page_icon="🏗️",
     layout="wide"
 )
 
+# Custom CSS Injection for Modern Styling
+st.markdown("""
+    <style>
+    /* Main background accent */
+    .main {
+        background-color: #f8f9fa;
+    }
+    
+    /* Hero Header Banner */
+    .hero-banner {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        padding: 24px 30px;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .hero-banner h1 {
+        color: white !important;
+        margin-bottom: 5px !important;
+        font-weight: 700;
+        font-size: 2.2rem;
+    }
+    .hero-banner p {
+        color: #d0e1fd;
+        font-size: 1.05rem;
+        margin-bottom: 12px;
+    }
+    .badge {
+        background-color: rgba(255, 255, 255, 0.2);
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+    }
+
+    /* Card Containers */
+    .css-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        margin-bottom: 20px;
+    }
+    
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #f1f5f9;
+        border-right: 1px solid #e2e8f0;
+    }
+    
+    /* Button Polish */
+    div.stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s ease-in-out;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # --------------------------
-# SIDEBAR / HIGHLIGHTED LEFT
+# SIDEBAR / NAVIGATION & METADATA
 # --------------------------
-st.sidebar.title("Pile Capacity Calculation")
-st.sidebar.subheader("As per IS 2911 Part 1 Sec 2")
-st.sidebar.markdown("**Developed by:** Siva Manikanta kumar")
+with st.sidebar:
+    st.markdown("### 🏗️ **IS 2911 Pile Capacity**")
+    st.caption("Bored Cast-in-situ Concrete Piles (Part 1 Sec 2)")
+    st.markdown("**Author:** Siva Manikanta kumar")
+    st.markdown("---")
 
-st.sidebar.markdown("---")
+    st.subheader("📋 Project Info")
+    project_name = st.text_input("Project Name", value="", placeholder="e.g. Metro Bridge Pier 4")
+    designer_name = st.text_input("Designer Name", value="", placeholder="e.g. S. M. Kumar")
+    bh_number = st.text_input("Borehole ID", value="", placeholder="e.g. BH-02")
 
-# Project Metadata Inputs
-project_name = st.sidebar.text_input("Project Name", value="", placeholder="Enter project name...")
-designer_name = st.sidebar.text_input("Designer", value="", placeholder="Enter designer name...")
-bh_number = st.sidebar.text_input("Borehole Number / ID", value="", placeholder="e.g., BH-01")
+    st.markdown("---")
+    st.subheader("⚙️ General Parameters")
 
-st.sidebar.markdown("---")
-st.sidebar.header("General Parameters")
+    pile_diameter = st.number_input("Pile Diameter, D (m)", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
+    pile_area = math.pi * (pile_diameter ** 2) / 4.0
+    st.info(f"📐 **Pile Area (Ap):** `{pile_area:.4f} m²`", icon="ℹ️")
 
-pile_diameter = st.sidebar.number_input("Pile Diameter, D (m)", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
-pile_area = math.pi * (pile_diameter ** 2) / 4.0
-st.sidebar.text(f"Area of Pile (m²): {pile_area:.4f}")
-
-gw_depth = st.sidebar.number_input("Ground Water Depth (m)", min_value=0.0, value=2.0, step=0.5)
-gamma_concrete = st.sidebar.number_input("Density of Concrete (kN/m³)", min_value=15.0, value=24.0, step=0.5)
-fos = st.sidebar.select_slider("Factor of Safety (FOS)", options=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0], value=2.5)
+    gw_depth = st.number_input("Ground Water Depth (m)", min_value=0.0, value=2.0, step=0.5)
+    gamma_concrete = st.number_input("Concrete Density (kN/m³)", min_value=15.0, value=24.0, step=0.5)
+    fos = st.select_slider("Factor of Safety (FOS)", options=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0], value=2.5)
 
 # --------------------------
-# MAIN PAGE CONTENT
+# HERO HEADER BANNER
 # --------------------------
-st.title("Geotechnical Pile Capacity Analysis")
-st.markdown("### Soil & Rock Layer Input")
+st.markdown("""
+    <div class="hero-banner">
+        <h1>Geotechnical Pile Capacity Engine</h1>
+        <p>Comprehensive axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2.</p>
+        <span class="badge">IS 2911:2010</span>
+        <span class="badge">Soil & Rock Strata</span>
+        <span class="badge">Interactive Curves</span>
+    </div>
+""", unsafe_allow_html=True)
+
+# --------------------------
+# MAIN CONTENT: LAYER INPUTS
+# --------------------------
+st.markdown("### 🧱 Stratigraphy & Soil Layers")
 
 if "layers" not in st.session_state:
     st.session_state["layers"] = []
 
-col_btn1, col_btn2 = st.columns([1, 5])
-with col_btn1:
-    if st.button("➕ Add Layer"):
+col_b1, col_b2, _ = st.columns([1.2, 1.5, 3])
+with col_b1:
+    if st.button("➕ Add Soil Layer", use_container_width=True):
         st.session_state["layers"].append({
             "from": 0.0, "to": 2.0, "strata": "Sand",
             "submerged_unit_weight": 10.0, "phi": 30.0, "Cu": 50.0,
@@ -52,14 +130,18 @@ with col_btn1:
             "spacing_discontinuities": ">300", "rqd": 80, "Ed": None, "Ei": None
         })
 
-with col_btn2:
-    if st.button("🗑️ Clear All Layers"):
+with col_b2:
+    if st.button("🗑️ Clear All Layers", use_container_width=True):
         st.session_state["layers"] = []
+
+st.write("")
 
 layers_to_delete = []
 
 for i, layer in enumerate(st.session_state["layers"]):
-    with st.expander(f"Layer {i+1} Details", expanded=True):
+    icon = "🏖️" if layer['strata'] == "Sand" else ("🧱" if layer['strata'] == "Clay" else "🪨")
+    
+    with st.expander(f"{icon} Layer {i+1}: {layer['strata']} ({layer['from']}m to {layer['to']}m)", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             layer['from'] = st.number_input(f"From Depth (m)", value=float(layer['from']), key=f"from_{i}")
@@ -68,7 +150,9 @@ for i, layer in enumerate(st.session_state["layers"]):
         with c3:
             layer['strata'] = st.selectbox(f"Strata Type", ["Sand", "Clay", "Rock"], index=["Sand", "Clay", "Rock"].index(layer['strata']), key=f"strata_{i}")
         with c4:
-            if st.button(f"Remove Layer {i+1}", key=f"del_{i}"):
+            st.write("")
+            st.write("")
+            if st.button(f"❌ Remove", key=f"del_{i}"):
                 layers_to_delete.append(i)
 
         if layer['strata'] == "Sand":
@@ -76,14 +160,14 @@ for i, layer in enumerate(st.session_state["layers"]):
             with sc1:
                 layer['submerged_unit_weight'] = st.number_input("Submerged Unit Weight γ' (kN/m³)", value=float(layer.get('submerged_unit_weight', 10.0)), key=f"gamma_{i}")
             with sc2:
-                layer['phi'] = st.number_input("Angle of Internal Friction ϕ (°)", value=float(layer.get('phi', 30.0)), key=f"phi_{i}")
+                layer['phi'] = st.number_input("Internal Friction Angle ϕ (°)", value=float(layer.get('phi', 30.0)), key=f"phi_{i}")
 
         elif layer['strata'] == "Clay":
             cc1, cc2 = st.columns(2)
             with cc1:
                 layer['submerged_unit_weight'] = st.number_input("Submerged Unit Weight γ' (kN/m³)", value=float(layer.get('submerged_unit_weight', 10.0)), key=f"gamma_c_{i}")
             with cc2:
-                layer['Cu'] = st.number_input("Unconfined Shear Strength Cu (kN/m²)", value=float(layer.get('Cu', 50.0)), key=f"cu_{i}")
+                layer['Cu'] = st.number_input("Unconfined Shear Strength Cu (kPa)", value=float(layer.get('Cu', 50.0)), key=f"cu_{i}")
 
         elif layer['strata'] == "Rock":
             rc1, rc2 = st.columns(2)
@@ -93,14 +177,14 @@ for i, layer in enumerate(st.session_state["layers"]):
                     "2. Moderately weathered, closely jointed (Schist, Slate)",
                     "3. Soft rock / Sedimentary (Shale, Sandstone, Mudstone)"
                 ]
-                selected_opt = st.selectbox("Rock Type Category", rock_opts, key=f"rocktype_{i}")
+                selected_opt = st.selectbox("Rock Classification", rock_opts, key=f"rocktype_{i}")
                 layer['rock_type'] = int(selected_opt[0])
 
             if layer['rock_type'] == 1:
                 with rc2:
-                    layer['ucs_mpa'] = st.number_input("Uniaxial Compressive Strength (MPa)", value=float(layer.get('ucs_mpa', 15.0)), key=f"ucs_{i}")
+                    layer['ucs_mpa'] = st.number_input("Uniaxial Compressive Strength UCS (MPa)", value=float(layer.get('ucs_mpa', 15.0)), key=f"ucs_{i}")
                 
-                st.markdown("*Option 1 Parameters (Optional/Advanced)*")
+                st.caption("⚙️ Option 1 Optional Properties")
                 rc3, rc4, rc5, rc6 = st.columns(4)
                 with rc3:
                     layer['spacing_discontinuities'] = st.selectbox("Discontinuity Spacing (mm)", [">300", "100-300", "30-100"], key=f"spacing_{i}")
@@ -117,9 +201,9 @@ for i, layer in enumerate(st.session_state["layers"]):
                 with rc2:
                     rc_col1, rc_col2 = st.columns(2)
                     with rc_col1:
-                        layer['Cu1'] = st.number_input("UCS at Socket Base / End, Cu1 (MPa)", value=float(layer.get('Cu1', 10.0)), key=f"cu1_{i}")
+                        layer['Cu1'] = st.number_input("Base/Tip UCS, Cu1 (MPa)", value=float(layer.get('Cu1', 10.0)), key=f"cu1_{i}")
                     with rc_col2:
-                        layer['Cu2'] = st.number_input("Avg UCS over Socket Length, Cu2 (MPa)", value=float(layer.get('Cu2', 10.0)), key=f"cu2_{i}")
+                        layer['Cu2'] = st.number_input("Avg Socket UCS, Cu2 (MPa)", value=float(layer.get('Cu2', 10.0)), key=f"cu2_{i}")
 
 if layers_to_delete:
     for index in sorted(layers_to_delete, reverse=True):
@@ -128,9 +212,12 @@ if layers_to_delete:
 
 st.markdown("---")
 
-if st.button("🚀 Run Analysis", type="primary"):
+# --------------------------
+# ANALYSIS EXECUTION & RESULTS TABS
+# --------------------------
+if st.button("⚡ Run Geotechnical Analysis", type="primary", use_container_width=True):
     if not st.session_state["layers"]:
-        st.error("Please add at least one layer to perform the calculation.")
+        st.error("⚠️ Please add at least one soil/rock layer before running analysis.")
     else:
         gen_inputs = {
             'project_name': project_name if project_name else "N/A",
@@ -145,28 +232,51 @@ if st.button("🚀 Run Analysis", type="primary"):
 
         results_df, rock_df = calculate_pile_capacity(gen_inputs, st.session_state["layers"])
 
-        st.subheader("Results Summary")
-        st.dataframe(results_df.style.format(precision=3), use_container_width=True)
+        # Top Highlight KPI Cards
+        total_depth = results_df['Depth (m)'].max() if not results_df.empty else 0.0
+        final_qu_comp = results_df['Ultimate Capacity Qu Comp (MN)'].iloc[-1] if not results_df.empty else 0.0
+        final_qa_comp = results_df['Allowable Capacity Qa Comp (MN)'].iloc[-1] if not results_df.empty else 0.0
+        final_qa_tens = results_df['Allowable Capacity Qa Tens (MN)'].iloc[-1] if not results_df.empty else 0.0
 
-        if not rock_df.empty:
-            st.subheader("Rock Socket Analysis")
-            st.dataframe(rock_df.style.format(precision=3), use_container_width=True)
+        st.markdown("### 📊 Performance Summary")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Depth", f"{total_depth:.2f} m")
+        m2.metric("Ult. Compression (Qu)", f"{final_qu_comp:.2f} MN")
+        m3.metric("Allow. Compression (Qa)", f"{final_qa_comp:.2f} MN", delta=f"FOS = {fos}")
+        m4.metric("Allow. Tension (Qa)", f"{final_qa_tens:.2f} MN")
 
-        excel_bytes = generate_excel_report(gen_inputs, st.session_state["layers"], results_df, rock_df)
-        st.download_button(
-            label="📥 Download Excel Report",
-            data=excel_bytes,
-            file_name=f"Pile_Capacity_{bh_number if bh_number else 'Report'}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.write("")
 
-        st.markdown("---")
-        st.subheader("Performance Curves")
+        # Organizing results into visual tabs
+        tab1, tab2, tab3 = st.tabs(["📋 Capacity Results Table", "📈 Depth vs Capacity Curves", "🪨 Rock Socket Details"])
 
-        fig1, fig2, fig3 = create_plots(results_df)
-        g_col1, g_col2 = st.columns(2)
-        with g_col1:
-            st.plotly_chart(fig1, use_container_width=True)
-            st.plotly_chart(fig2, use_container_width=True)
-        with g_col2:
-            st.plotly_chart(fig3, use_container_width=True)
+        with tab1:
+            st.markdown("#### **Layer-by-Layer Calculation Sheet**")
+            st.dataframe(results_df.style.format(precision=3), use_container_width=True)
+
+            # Download Excel Button
+            excel_bytes = generate_excel_report(gen_inputs, st.session_state["layers"], results_df, rock_df)
+            st.download_button(
+                label="📥 Download Detailed Excel Report",
+                data=excel_bytes,
+                file_name=f"Pile_Capacity_{bh_number if bh_number else 'Report'}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with tab2:
+            st.markdown("#### **Performance Profile Graphs**")
+            fig1, fig2, fig3 = create_plots(results_df)
+            
+            g_col1, g_col2 = st.columns(2)
+            with g_col1:
+                st.plotly_chart(fig1, use_container_width=True)
+                st.plotly_chart(fig2, use_container_width=True)
+            with g_col2:
+                st.plotly_chart(fig3, use_container_width=True)
+
+        with tab3:
+            if not rock_df.empty:
+                st.markdown("#### **Rock Socket Parameters & Capacity Summary**")
+                st.dataframe(rock_df.style.format(precision=3), use_container_width=True)
+            else:
+                st.info("No rock strata identified in the inputs.", icon="ℹ️")
