@@ -17,9 +17,10 @@ st.sidebar.markdown("**Developed by:** Siva Manikanta kumar")
 
 st.sidebar.markdown("---")
 
-# User inputs left blank with placeholders
+# Project Metadata Inputs
 project_name = st.sidebar.text_input("Project Name", value="", placeholder="Enter project name...")
 designer_name = st.sidebar.text_input("Designer", value="", placeholder="Enter designer name...")
+bh_number = st.sidebar.text_input("Borehole Number / ID", value="", placeholder="e.g., BH-01")
 
 st.sidebar.markdown("---")
 st.sidebar.header("General Parameters")
@@ -134,6 +135,7 @@ if st.button("🚀 Run Analysis", type="primary"):
         gen_inputs = {
             'project_name': project_name if project_name else "N/A",
             'designer': designer_name if designer_name else "N/A",
+            'bh_number': bh_number if bh_number else "N/A",
             'pile_diameter': pile_diameter,
             'pile_area': pile_area,
             'gw_depth': gw_depth,
@@ -154,7 +156,7 @@ if st.button("🚀 Run Analysis", type="primary"):
         st.download_button(
             label="📥 Download Excel Report",
             data=excel_bytes,
-            file_name="Pile_Capacity_IS2911_Report.xlsx",
+            file_name=f"Pile_Capacity_{bh_number if bh_number else 'Report'}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
