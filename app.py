@@ -77,7 +77,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------------------------
-# STRATIGRAPHY LAYER INPUTS
+# Soil Profile
 # --------------------------
 st.markdown("### 🧱 Stratigraphy & Soil Layers")
 
