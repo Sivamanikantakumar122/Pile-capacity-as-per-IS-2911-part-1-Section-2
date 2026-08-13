@@ -1,5 +1,7 @@
 import math
 import datetime
+import base64
+import os
 import streamlit as st
 import pandas as pd
 from backend import calculate_pile_capacity, generate_excel_report, create_plots
@@ -8,7 +10,7 @@ from backend import calculate_pile_capacity, generate_excel_report, create_plots
 # PAGE CONFIG & STYLING
 # --------------------------
 st.set_page_config(
-    page_title="Pile Capacity - IS 2911",
+    page_title="Pile Capacity",
     page_icon="🏗️",
     layout="wide"
 )
@@ -35,14 +37,29 @@ st.markdown("""
     }
     section[data-testid="stSidebar"] { background-color: #f1f5f9; }
     div.stButton > button { border-radius: 8px; font-weight: 600; }
+    
+    .header-icon {
+        width: 32px;
+        height: 32px;
+        vertical-align: middle;
+        margin-right: 10px;
+        border-radius: 4px;
+        object-fit: cover;
+    }
     </style>
 """, unsafe_allow_html=True)
+
+def get_image_base64(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode()
+    return None
 
 # --------------------------
 # SIDEBAR METADATA & PARAMS
 # --------------------------
 with st.sidebar:
-    st.markdown("### 🏗️ **Pile Capacity**")
+    st.markdown("### 🏗️ **IS 2911 Pile Capacity**")
     st.caption("Bored Cast-in-situ Concrete Piles (Part 1 Sec 2)")
     st.markdown("**Developed by:** Siva Manikanta kumar")
     st.markdown("---")
@@ -78,9 +95,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------------------------
-# SOIL PROFILE INPUTS
+# SOIL PROFILE INPUTS WITH CUSTOM ICON
 # --------------------------
-st.markdown("### Soil profile ")
+img_b64 = get_image_base64("soil_icon.png")
+
+if img_b64:
+    st.markdown(
+        f'### <img src="data:image/png;base64,{img_b64}" class="header-icon"> Stratigraphy & Soil Layers', 
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown("### ⛰️ Stratigraphy & Soil Layers")
 
 if "layers" not in st.session_state:
     st.session_state["layers"] = []
@@ -197,7 +222,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
 
         soil_df, rock_df = calculate_pile_capacity(gen_inputs, st.session_state["layers"])
 
-        # SOIL CAPACITY VALUES
         total_soil_depth = soil_df['Depth (m)'].max() if not soil_df.empty else 0.0
         soil_qu_comp = soil_df['Ultimate Bearing Resistance Qu (MN)'].iloc[-1] if not soil_df.empty else 0.0
         soil_qa_comp = soil_df['Allowable Bearing Capacity Qa (MN)'].iloc[-1] if not soil_df.empty else 0.0
@@ -205,7 +229,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
 
         st.markdown("### 📊 Performance Summary")
 
-        # 1. Soil Capacity Summary
         st.markdown("##### **1. Soil Capacity Summary**")
         s1, s2, s3, s4 = st.columns(4)
         s1.metric("Total Depth in Soil", f"{total_soil_depth:.2f} m")
@@ -213,7 +236,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
         s3.metric("Soil Allow. Compression (Qa)", f"{soil_qa_comp:.2f} MN", delta=f"FOS = {fos}")
         s4.metric("Soil Allow. Tension (Qa)", f"{soil_qa_tens:.2f} MN")
 
-        # 2. Rock Socket Summary (if rock exists)
         if not rock_df.empty:
             st.write("")
             st.markdown("##### **2. Rock Socket Capacity Summary**")
@@ -228,7 +250,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
 
         st.write("")
 
-        # 4 TABS LAYOUT
         tab1, tab2, tab3, tab4 = st.tabs([
             "📋 Capacity Results Table", 
             "📈 Depth vs Capacity Curves", 
@@ -236,7 +257,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             "📄 Design Summary Report"
         ])
 
-        # TAB 1: Soil Results Table Only
         with tab1:
             st.markdown("#### **Soil Layer-by-Layer Calculation Sheet**")
             if not soil_df.empty:
@@ -265,7 +285,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # TAB 2: Curves (Soil)
         with tab2:
             st.markdown("#### **Performance Profile Graphs (Soil)**")
             fig1, fig2, fig3 = create_plots(soil_df)
@@ -277,7 +296,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             with g_col2:
                 st.plotly_chart(fig3, use_container_width=True)
 
-        # TAB 3: Rock Socket Details Only
         with tab3:
             st.markdown("#### **Rock Socket Parameters & Capacity Summary**")
             if not rock_df.empty:
@@ -285,12 +303,10 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             else:
                 st.info("No rock strata identified in the inputs.", icon="ℹ️")
 
-        # TAB 4: Design Summary Report
         with tab4:
             st.markdown("## 📄 Design Summary Report")
             st.markdown("---")
 
-            # Project Information
             st.markdown("### **PROJECT INFORMATION**")
             st.markdown(f"* **Project:** {project_name if project_name else 'N/A'}")
             st.markdown(f"* **Location:** {project_location if project_location else 'N/A'}")
@@ -301,7 +317,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
 
             st.markdown("---")
 
-            # Pile Properties
             st.markdown("### **PILE PROPERTIES**")
             st.markdown(f"* **Diameter (D):** {pile_diameter:.3f} m")
             st.markdown(f"* **Cross-sectional Area (Ap):** {pile_area:.4f} m²")
@@ -314,7 +329,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
 
             st.markdown("---")
 
-            # Stratigraphy & Soil Profile
             st.markdown("### **STRATIGRAPHY PROFILE**")
             st.markdown(f"* **Ground Water Depth:** {gw_depth:.2f} m")
             st.markdown(f"* **Total Layers Input:** {len(st.session_state['layers'])}")
@@ -337,7 +351,6 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
 
             st.markdown("---")
 
-            # Capacity Results Summary
             st.markdown("### **CAPACITY RESULTS SUMMARY**")
             
             c_res1, c_res2 = st.columns(2)
@@ -351,10 +364,25 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
                 if not rock_df.empty:
                     st.markdown("#### **Rock Socket Capacities**")
                     st.markdown(f"* **Socket Length (ls):** {rock_df['Socket Length Taken ls (m)'].iloc[0]:.2f} m")
-                    st.markdown(f"* **Cu1 (Base UCS):** {rock_df['Cu1 - Base UCS (MPa)'].iloc[0]:.2f} MPa")
-                    st.markdown(f"* **Cu2 (Avg UCS):** {rock_df['Cu2 - Avg UCS (MPa)'].iloc[0]:.2f} MPa")
-                    st.markdown(f"* **Rock Ult. Capacity (Qu):** {rock_df['Ultimate Rock Capacity Qu (MN)'].iloc[0]:.3f} MN")
-                    st.markdown(f"* **Rock Allow. Capacity (Qa):** {rock_df['Allowable Rock Capacity Qa (MN)'].iloc[0]:.3f} MN")
+                    
+                    if 'qc - Compressive Strength (t/m²)' in rock_df.columns:
+                        st.markdown(f"* **qc (Compressive Strength):** {rock_df['qc - Compressive Strength (t/m²)'].iloc[0]:.2f} t/m²")
+                        if 'Nj - Discontinuity Factor' in rock_df.columns:
+                            st.markdown(f"* **Nj (Discontinuity Factor):** {rock_df['Nj - Discontinuity Factor'].iloc[0]:.3f}")
+                        if 'Nd - Depth Factor' in rock_df.columns:
+                            st.markdown(f"* **Nd (Depth Factor):** {rock_df['Nd - Depth Factor'].iloc[0]:.3f}")
+                        if 'alpha_r - Socket Friction Factor' in rock_df.columns:
+                            st.markdown(f"* **alpha_r (Socket Friction Factor):** {rock_df['alpha_r - Socket Friction Factor'].iloc[0]:.3f}")
+                        if 'beta_r - Mass Factor' in rock_df.columns:
+                            st.markdown(f"* **beta_r (Mass Factor):** {rock_df['beta_r - Mass Factor'].iloc[0]:.3f}")
+                    elif 'Cu1 - Base UCS (MPa)' in rock_df.columns:
+                        st.markdown(f"* **Cu1 (Base UCS):** {rock_df['Cu1 - Base UCS (MPa)'].iloc[0]:.2f} MPa")
+                        st.markdown(f"* **Cu2 (Avg UCS):** {rock_df['Cu2 - Avg UCS (MPa)'].iloc[0]:.2f} MPa")
+
+                    qu_val = rock_df['Ultimate Rock Capacity Qu (MN)'].iloc[0] if 'Ultimate Rock Capacity Qu (MN)' in rock_df.columns else 0.0
+                    qa_val = rock_df['Allowable Rock Capacity Qa (MN)'].iloc[0] if 'Allowable Rock Capacity Qa (MN)' in rock_df.columns else 0.0
+                    st.markdown(f"* **Rock Ult. Capacity (Qu):** {qu_val:.3f} MN")
+                    st.markdown(f"* **Rock Allow. Capacity (Qa):** {qa_val:.3f} MN")
                 else:
                     st.markdown("#### **Rock Socket Capacities**")
                     st.markdown("*No rock strata evaluated.*")
