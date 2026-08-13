@@ -20,7 +20,8 @@ def get_n_gamma(phi: float) -> float:
 def calculate_pile_capacity(general_inputs: dict, layers: list):
     """
     Performs pile capacity calculations per IS 2911 Part 1 Sec 2.
-    Uses simple arithmetic average (unweighted) for Cu2 over spanned rock layers.
+    - Option 1: Displays qc (in t/m2) calculated from simple average UCS over spanned socket length.
+    - Option 2 & 3: Displays Cu1 (Base UCS) and Cu2 (Avg UCS over socket).
     """
     D = general_inputs['pile_diameter']
     A_p = math.pi * (D ** 2) / 4.0
@@ -51,7 +52,6 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         strata = layer['strata']
         gamma_sub = layer.get('submerged_unit_weight', 0.0)
 
-        # Overburden pressure calculations
         layer_PDi = gamma_sub * thickness
         cumulative_PD += layer_PDi
 
@@ -106,11 +106,9 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             layer_Qs = unit_skin_friction * A_s
             cumulative_Qs_soil += layer_Qs
 
-        # Pile Weight in Soil
         layer_weight = gamma_conc * A_p * thickness
         cumulative_weight_soil += layer_weight
 
-        # Soil capacities
         Qu_comp_kN = cumulative_Qs_soil + Qb_layer
         Qu_comp_MN = Qu_comp_kN / 1000.0
         Qa_comp_MN = Qu_comp_MN / fos
@@ -175,19 +173,19 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             spanned_ucs_list.append(r_ucs)
             actual_ls += penetration
             socket_remaining -= penetration
-            Cu1_calc = r_ucs  # Last rock layer reached defines Cu1 at base
+            Cu1_calc = r_ucs  # Last rock layer reached defines Cu1 at base for Opt 2/3
 
-        # SIMPLE ARITHMETIC AVERAGE: (9.14 + 1.03 + 1.03) / 3 = 3.733 MPa
-        Cu2_calc = (sum(spanned_ucs_list) / len(spanned_ucs_list)) if spanned_ucs_list else Cu1_calc
+        # Simple Arithmetic Average across spanned rock layers
+        avg_ucs_mpa = (sum(spanned_ucs_list) / len(spanned_ucs_list)) if spanned_ucs_list else Cu1_calc
 
-        # Calculate Rock Capacity (Soil Qs & Qb NOT added)
+        # --- OPTION 1 LOGIC ---
         if rock_type == 1:
-            ucs_mpa = Cu1_calc
-            qc_ton_m2 = ucs_mpa * 101.97
+            qc_ton_m2 = avg_ucs_mpa * 101.97  # Convert average UCS in MPa to t/m2
+
             spacing = first_rock.get('spacing_discontinuities', '>300')
             N_j = 0.4 if spacing == '>300' else (0.25 if spacing == '100-300' else 0.1)
             N_d = 0.8 + 0.2 * (actual_ls / D)
-            alpha_r = 5.0 / math.sqrt(ucs_mpa) if ucs_mpa > 0 else 0
+            alpha_r = 5.0 / math.sqrt(avg_ucs_mpa) if avg_ucs_mpa > 0 else 0
 
             ed = first_rock.get('Ed', None)
             ei = first_rock.get('Ei', None)
@@ -199,24 +197,37 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
                 j_val = 0.2 if rqd < 50 else (0.35 if rqd <= 75 else (0.65 if rqd <= 90 else 1.0))
 
             beta_r = j_val ** 0.45
+            
+            # Qu = qc * Nj * Nd * Ap + qc * pi * D * ls * alpha_r * beta_r (in tons)
             Qu_rock_tons = (qc_ton_m2 * N_j * N_d * A_p) + (qc_ton_m2 * math.pi * D * actual_ls * alpha_r * beta_r)
             Qu_rock_MN = Qu_rock_tons * 0.00980665
+            Qa_rock_MN = Qu_rock_MN / fos
 
-        else:  # Option 2 & 3
+            # Option 1 output dictionary (qc instead of Cu1 and Cu2)
+            rock_summary = {
+                'Rock Option': option_desc,
+                'Socket Length Taken ls (m)': actual_ls,
+                'qc - Compressive Strength (t/m²)': qc_ton_m2,
+                'Ultimate Rock Capacity Qu (MN)': Qu_rock_MN,
+                'Allowable Rock Capacity Qa (MN)': Qa_rock_MN
+            }
+
+        # --- OPTIONS 2 & 3 LOGIC (UNTOUCHED) ---
+        else:
+            Cu2_calc = avg_ucs_mpa
             Nc = 9.0
             alpha_rock = 0.9
             Qu_rock_MN = (Cu1_calc * Nc * A_p) + (alpha_rock * Cu2_calc * math.pi * D * actual_ls)
+            Qa_rock_MN = Qu_rock_MN / fos
 
-        Qa_rock_MN = Qu_rock_MN / fos
-
-        rock_summary = {
-            'Rock Option': option_desc,
-            'Socket Length Taken ls (m)': actual_ls,
-            'Cu1 - Base UCS (MPa)': Cu1_calc,
-            'Cu2 - Avg UCS (MPa)': Cu2_calc,
-            'Ultimate Rock Capacity Qu (MN)': Qu_rock_MN,
-            'Allowable Rock Capacity Qa (MN)': Qa_rock_MN
-        }
+            rock_summary = {
+                'Rock Option': option_desc,
+                'Socket Length Taken ls (m)': actual_ls,
+                'Cu1 - Base UCS (MPa)': Cu1_calc,
+                'Cu2 - Avg UCS (MPa)': Cu2_calc,
+                'Ultimate Rock Capacity Qu (MN)': Qu_rock_MN,
+                'Allowable Rock Capacity Qa (MN)': Qa_rock_MN
+            }
 
     rock_df = pd.DataFrame([rock_summary]) if rock_summary else pd.DataFrame()
 
