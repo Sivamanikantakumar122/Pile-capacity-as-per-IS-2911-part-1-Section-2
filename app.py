@@ -330,7 +330,7 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             # Analysis Parameters
             st.markdown("### **ANALYSIS PARAMETERS**")
             st.markdown("* **Design Standard:** IS 2911 (Part 1 / Section 2)")
-            st.markdown("* **Methodology:** Static Formulae (Working Stress Method)")
+            st.markdown("* **Methodology:** Static Formulae ")
             st.markdown("* **Loading Conditions:** Static Compression & Tension")
             st.markdown(f"* **Max Depth Analyzed:** {total_depth:.2f} m")
 
