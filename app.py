@@ -48,7 +48,8 @@ with st.sidebar:
 
     st.subheader("📋 Project Info")
     project_name = st.text_input("Project Name", value="", placeholder="e.g. Metro ")
-    designer_name = st.text_input("Designer Name", value="", placeholder="e.g. Kumar")
+    project_Location = st.text_input("Project Location", value="", placeholder="e.g. Attili ")
+    designer_name = st.text_input("Designer Name", value="", placeholder="e.g. Siva")
     bh_number = st.text_input("Borehole ID", value="", placeholder="e.g. BH-02")
 
     st.markdown("---")
