@@ -215,7 +215,7 @@ st.markdown("---")
 # --------------------------
 # ANALYSIS EXECUTION & RESULTS TABS
 # --------------------------
-if st.button("⚡ Run Geotechnical Analysis", type="primary", use_container_width=True):
+if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
     if not st.session_state["layers"]:
         st.error("⚠️ Please add at least one soil/rock layer before running analysis.")
     else:
