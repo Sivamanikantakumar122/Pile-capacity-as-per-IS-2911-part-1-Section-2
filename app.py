@@ -68,7 +68,7 @@ with st.sidebar:
 # --------------------------
 st.markdown("""
     <div class="hero-banner">
-        <h1>Geotechnical Pile Capacity </h1>
+        <h1> Pile Capacity </h1>
         <p>Comprehensive axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2.</p>
         <span class="badge">IS 2911:2010</span>
         <span class="badge">Soil & Rock Strata</span>
@@ -214,8 +214,12 @@ if st.button("⚡ Run Geotechnical Analysis", type="primary", use_container_widt
         with tab1:
             st.markdown("#### **Layer-by-Layer Calculation Sheet**")
             display_cols = [
-                'Depth (m)', 'Strata', 'Skin Friction Qs (kN)',
-                'End Bearing Resistance Qb (kN)', 'Ultimate Bearing Resistance Qu (MN)',
+                'Depth (m)', 
+                'Strata', 
+                'Effective Overburden Pressure PD (kN/m²)',
+                'Skin Friction Qs (kN)',
+                'End Bearing Resistance Qb (kN)', 
+                'Ultimate Bearing Resistance Qu (MN)',
                 'Allowable Bearing Capacity Qa (MN)'
             ]
             st.dataframe(results_df[display_cols].style.format(precision=3), use_container_width=True)
