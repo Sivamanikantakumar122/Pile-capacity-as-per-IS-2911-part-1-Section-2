@@ -80,12 +80,12 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### 🏗️ **IS 2911 Pile Capacity**")
     st.caption("Bored Cast-in-situ Concrete Piles (Part 1 Sec 2)")
-    st.markdown("**Author:** Siva Manikanta kumar")
+    st.markdown("**Developed by:** Siva Manikanta kumar")
     st.markdown("---")
 
     st.subheader("📋 Project Info")
-    project_name = st.text_input("Project Name", value="", placeholder="e.g. Metro Bridge Pier 4")
-    designer_name = st.text_input("Designer Name", value="", placeholder="e.g. S. M. Kumar")
+    project_name = st.text_input("Project Name", value="", placeholder="e.g. Metro")
+    designer_name = st.text_input("Designer Name", value="", placeholder="e.g.Kumar")
     bh_number = st.text_input("Borehole ID", value="", placeholder="e.g. BH-02")
 
     st.markdown("---")
