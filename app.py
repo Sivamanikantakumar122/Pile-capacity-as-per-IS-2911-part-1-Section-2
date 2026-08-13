@@ -105,7 +105,7 @@ if img_b64:
         unsafe_allow_html=True
     )
 else:
-    st.markdown("### ⛰️ Stratigraphy & Soil Layers")
+    st.markdown("### ⛰️ Soil profile")
 
 if "layers" not in st.session_state:
     st.session_state["layers"] = []
