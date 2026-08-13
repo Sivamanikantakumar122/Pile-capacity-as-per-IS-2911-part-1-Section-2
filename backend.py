@@ -20,7 +20,7 @@ def get_n_gamma(phi: float) -> float:
 def calculate_pile_capacity(general_inputs: dict, layers: list):
     """
     Performs layer-by-layer pile capacity calculations per IS 2911 Part 1 Sec 2.
-    Cumulative overburden pressure (PD) is accumulated from top layers downwards.
+    Both PD and PD_lim accumulate continuously from top layer downwards.
     """
     D = general_inputs['pile_diameter']
     A_p = math.pi * (D ** 2) / 4.0
@@ -32,7 +32,8 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
 
     cumulative_Qs = 0.0
     cumulative_weight = 0.0
-    cumulative_PD = 0.0  # Cumulative Overburden Pressure across layers
+    cumulative_PD = 0.0       # Uncapped cumulative overburden pressure
+    cumulative_PD_lim = 0.0   # Cumulative limit overburden pressure
 
     output_rows = []
     rock_inputs_list = []
@@ -42,9 +43,9 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         depth_to = layer['to']
         thickness = abs(depth_to - depth_from)
         strata = layer['strata']
-
-        # Cumulative Effective Overburden Pressure Calculation
         gamma_sub = layer.get('submerged_unit_weight', 0.0)
+
+        # Uncapped overburden pressure increment
         layer_PDi = gamma_sub * thickness
         cumulative_PD += layer_PDi
 
@@ -53,14 +54,19 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             phi = layer.get('phi', 0.0)
             if phi < 30:
                 H_cr = 15.0 * D
-            elif phi > 40:
-                H_cr = 20.0 * D
-            else:
+            elif phi <= 40:
                 H_cr = 17.5 * D
+            else:
+                H_cr = 20.0 * D
 
-            # Capped Overburden at Critical Height
-            PD_lim = gamma_sub * H_cr
-            PD = min(cumulative_PD, PD_lim)
+            # Cumulative PD_lim increment for Sand
+            delta_PD_lim = gamma_sub * H_cr
+            cumulative_PD_lim += delta_PD_lim
+
+            # Design PD for Sand is capped by cumulative PD_lim
+            PD = min(cumulative_PD, cumulative_PD_lim)
+            hcr_display = H_cr
+            pd_lim_display = cumulative_PD_lim
 
             N_gamma = get_n_gamma(phi)
             N_q = 0.178 * math.exp(0.1609 * phi)
@@ -77,7 +83,15 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         # --- CLAY STRATA ---
         elif strata == 'Clay':
             Cu = layer.get('Cu', 0.0)
+
+            # Clay has NO PD Limit capping — PD is purely cumulative
             PD = cumulative_PD
+            
+            # Cumulative PD_lim continues accumulating actual overburden
+            cumulative_PD_lim += layer_PDi
+
+            hcr_display = "N/A"
+            pd_lim_display = "N/A"
 
             if Cu < 40:
                 alpha = 1.0
@@ -98,7 +112,12 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         else:
             rock_type = layer.get('rock_type', 1)
             ucs_mpa = layer.get('ucs_mpa', 0.0)
+
             PD = cumulative_PD
+            cumulative_PD_lim += layer_PDi
+
+            hcr_display = "N/A"
+            pd_lim_display = "N/A"
 
             if rock_type == 1:
                 desired_ls = 2.0 * D
@@ -203,7 +222,11 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
 
         output_rows.append({
             'Depth (m)': depth_to,
+            'Thickness (m)': thickness,
             'Strata': strata,
+            'Uncapped PD (kN/m²)': cumulative_PD,
+            'Critical Height Hcr (m)': hcr_display,
+            'Cumulative PD Lim (kN/m²)': pd_lim_display,
             'Effective Overburden Pressure PD (kN/m²)': PD,
             'Unit Skin Friction (kPa)': unit_skin_friction,
             'Skin Friction Qs (kN)': cumulative_Qs,
@@ -250,10 +273,14 @@ def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.Dat
 
         cleaned_layer_inputs.append(item)
 
-    # Sheet 2: Standardized results sheet with PD column
+    # Sheet 2: Standardized results sheet
     sheet2_cols = [
         'Depth (m)',
+        'Thickness (m)',
         'Strata',
+        'Uncapped PD (kN/m²)',
+        'Critical Height Hcr (m)',
+        'Cumulative PD Lim (kN/m²)',
         'Effective Overburden Pressure PD (kN/m²)',
         'Skin Friction Qs (kN)',
         'End Bearing Resistance Qb (kN)',
@@ -274,7 +301,7 @@ def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.Dat
 
 
 def create_plots(results_df: pd.DataFrame):
-    """Generates Plotly graphs with top X-axis, full outer borders, and titles placed neatly at the bottom."""
+    """Generates Plotly graphs with top X-axis, full outer borders, and titles placed at the bottom."""
     def apply_chart_borders(fig, title, x_label):
         fig.update_layout(
             title=dict(
@@ -288,7 +315,7 @@ def create_plots(results_df: pd.DataFrame):
             yaxis_title='Depth (m)',
             yaxis_autorange='reversed',
             plot_bgcolor='white',
-            margin=dict(l=50, r=40, t=50, b=65)  # Bottom margin expanded for title placement
+            margin=dict(l=50, r=40, t=50, b=65)
         )
         fig.update_xaxes(
             title=dict(text=x_label, font=dict(size=12)),
