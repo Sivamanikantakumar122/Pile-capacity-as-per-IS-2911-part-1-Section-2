@@ -20,8 +20,8 @@ def get_n_gamma(phi: float) -> float:
 def calculate_pile_capacity(general_inputs: dict, layers: list):
     """
     Performs pile capacity calculations per IS 2911 Part 1 Sec 2.
-    - Option 1: Displays qc (in t/m2) calculated from simple average UCS over spanned socket length.
-    - Option 2 & 3: Displays Cu1 (Base UCS) and Cu2 (Avg UCS over socket).
+    - Option 1: Displays qc (t/m2), Nj, Nd, alpha_r, beta_r, Qu, Qa.
+    - Option 2 & 3: Displays Cu1 (Base UCS), Cu2 (Avg UCS), Qu, Qa.
     """
     D = general_inputs['pile_diameter']
     A_p = math.pi * (D ** 2) / 4.0
@@ -203,16 +203,20 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             Qu_rock_MN = Qu_rock_tons * 0.00980665
             Qa_rock_MN = Qu_rock_MN / fos
 
-            # Option 1 output dictionary (qc instead of Cu1 and Cu2)
+            # Option 1 output dictionary (No Cu1/Cu2; includes qc, Nj, Nd, alpha_r, beta_r)
             rock_summary = {
                 'Rock Option': option_desc,
                 'Socket Length Taken ls (m)': actual_ls,
                 'qc - Compressive Strength (t/m²)': qc_ton_m2,
+                'Nj - Discontinuity Factor': N_j,
+                'Nd - Depth Factor': N_d,
+                'alpha_r - Socket Friction Factor': alpha_r,
+                'beta_r - Mass Factor': beta_r,
                 'Ultimate Rock Capacity Qu (MN)': Qu_rock_MN,
                 'Allowable Rock Capacity Qa (MN)': Qa_rock_MN
             }
 
-        # --- OPTIONS 2 & 3 LOGIC (UNTOUCHED) ---
+        # --- OPTIONS 2 & 3 LOGIC ---
         else:
             Cu2_calc = avg_ucs_mpa
             Nc = 9.0
@@ -306,7 +310,6 @@ def create_plots(soil_df: pd.DataFrame):
             gridcolor='#f0f0f0'
         )
 
-    # Plot 1: Unit Skin Friction vs Depth
     fig1 = go.Figure()
     fig1.add_trace(go.Scatter(
         x=soil_df['Unit Skin Friction (kPa)'],
@@ -317,7 +320,6 @@ def create_plots(soil_df: pd.DataFrame):
     ))
     apply_chart_borders(fig1, 'Unit Skin Friction vs Depth', 'Unit Skin Friction (kPa)')
 
-    # Plot 2: Ultimate End Bearing Resistance vs Depth
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
         x=soil_df['End Bearing Resistance Qb (kN)'],
@@ -328,7 +330,6 @@ def create_plots(soil_df: pd.DataFrame):
     ))
     apply_chart_borders(fig2, 'Ultimate End Bearing Resistance vs Depth', 'Qb (kN)')
 
-    # Plot 3: Ultimate Pile Capacity vs Depth
     fig3 = go.Figure()
     fig3.add_trace(go.Scatter(
         x=soil_df['Ultimate Bearing Resistance Qu (MN)'],
