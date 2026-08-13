@@ -20,7 +20,7 @@ def get_n_gamma(phi: float) -> float:
 def calculate_pile_capacity(general_inputs: dict, layers: list):
     """
     Performs pile capacity calculations per IS 2911 Part 1 Sec 2.
-    Uses simple arithmetic average for Cu2 over spanned rock layers.
+    Uses simple arithmetic average (unweighted) for Cu2 over spanned rock layers.
     """
     D = general_inputs['pile_diameter']
     A_p = math.pi * (D ** 2) / 4.0
@@ -177,7 +177,7 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             socket_remaining -= penetration
             Cu1_calc = r_ucs  # Last rock layer reached defines Cu1 at base
 
-        # Simple Arithmetic Average for Cu2
+        # SIMPLE ARITHMETIC AVERAGE: (9.14 + 1.03 + 1.03) / 3 = 3.733 MPa
         Cu2_calc = (sum(spanned_ucs_list) / len(spanned_ucs_list)) if spanned_ucs_list else Cu1_calc
 
         # Calculate Rock Capacity (Soil Qs & Qb NOT added)
