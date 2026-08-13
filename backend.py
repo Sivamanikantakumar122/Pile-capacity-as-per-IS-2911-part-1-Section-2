@@ -98,6 +98,7 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         else:
             rock_type = layer.get('rock_type', 1)
             ucs_mpa = layer.get('ucs_mpa', 0.0)
+            PD = cumulative_PD
 
             if rock_type == 1:
                 desired_ls = 2.0 * D
@@ -203,7 +204,7 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         output_rows.append({
             'Depth (m)': depth_to,
             'Strata': strata,
-            'Cumulative PD (kN/m²)': cumulative_PD,
+            'Effective Overburden Pressure PD (kN/m²)': PD,
             'Unit Skin Friction (kPa)': unit_skin_friction,
             'Skin Friction Qs (kN)': cumulative_Qs,
             'Unit End Bearing (kPa)': unit_end_bearing,
@@ -224,7 +225,7 @@ def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.Dat
     """Generates multi-sheet Excel file adhering strictly to requested input/output structures."""
     output = io.BytesIO()
 
-    # Sheet 1: Format clean layer inputs (hiding irrelevant blank fields per strata)
+    # Sheet 1: Clean layer inputs
     cleaned_layer_inputs = []
     for l in layers:
         item = {
@@ -249,10 +250,11 @@ def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.Dat
 
         cleaned_layer_inputs.append(item)
 
-    # Sheet 2: Standardized results sheet
+    # Sheet 2: Standardized results sheet with PD column
     sheet2_cols = [
         'Depth (m)',
         'Strata',
+        'Effective Overburden Pressure PD (kN/m²)',
         'Skin Friction Qs (kN)',
         'End Bearing Resistance Qb (kN)',
         'Ultimate Bearing Resistance Qu (MN)',
@@ -261,14 +263,10 @@ def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.Dat
     sheet2_df = results_df[sheet2_cols] if not results_df.empty else pd.DataFrame()
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Sheet 1: General & Input Parameters
         pd.DataFrame([general_inputs]).to_excel(writer, sheet_name='Sheet1_GeneralInputs', index=False)
         pd.DataFrame(cleaned_layer_inputs).to_excel(writer, sheet_name='Sheet1_LayerInputs', index=False)
-
-        # Sheet 2: Calculation Results
         sheet2_df.to_excel(writer, sheet_name='Sheet2_Results', index=False)
 
-        # Sheet 3: Rock Socket Information (if present)
         if not rock_df.empty:
             rock_df.to_excel(writer, sheet_name='Sheet3_RockAnalysis', index=False)
 
@@ -276,17 +274,24 @@ def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.Dat
 
 
 def create_plots(results_df: pd.DataFrame):
-    """Generates Plotly graphs with X-axis on top and full outer borders."""
+    """Generates Plotly graphs with top X-axis, full outer borders, and titles placed neatly at the bottom."""
     def apply_chart_borders(fig, title, x_label):
         fig.update_layout(
-            title=dict(text=title, x=0.5, xanchor='center'),
+            title=dict(
+                text=f"<b>{title}</b>",
+                x=0.5,
+                xanchor='center',
+                y=0.01,
+                yanchor='bottom',
+                font=dict(size=14, color="#1e3c72")
+            ),
             yaxis_title='Depth (m)',
             yaxis_autorange='reversed',
             plot_bgcolor='white',
-            margin=dict(l=40, r=40, t=60, b=40)
+            margin=dict(l=50, r=40, t=50, b=65)  # Bottom margin expanded for title placement
         )
         fig.update_xaxes(
-            title=x_label,
+            title=dict(text=x_label, font=dict(size=12)),
             side='top',
             showline=True,
             linewidth=1.5,
