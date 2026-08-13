@@ -104,8 +104,8 @@ with st.sidebar:
 # --------------------------
 st.markdown("""
     <div class="hero-banner">
-        <h1>Geotechnical Pile Capacity Engine</h1>
-        <p>Comprehensive axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2.</p>
+        <h1> Pile Capacity </h1>
+        <p>Axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2.</p>
         <span class="badge">IS 2911:2010</span>
         <span class="badge">Soil & Rock Strata</span>
         <span class="badge">Interactive Curves</span>
