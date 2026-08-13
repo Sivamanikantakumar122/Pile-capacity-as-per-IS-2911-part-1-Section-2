@@ -67,7 +67,7 @@ with st.sidebar:
 # --------------------------
 st.markdown("""
     <div class="hero-banner">
-        <h1> Pile Capacity Calculations</h1>
+        <h1>Geotechnical Pile Capacity Engine</h1>
         <p>Comprehensive axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2.</p>
         <span class="badge">IS 2911:2010</span>
         <span class="badge">Soil & Rock Strata</span>
@@ -85,7 +85,6 @@ if "layers" not in st.session_state:
 
 layers_to_delete = []
 
-# Enforce depth continuity across layers
 for i, layer in enumerate(st.session_state["layers"]):
     if i > 0:
         layer['from'] = st.session_state["layers"][i-1]['to']
@@ -132,7 +131,6 @@ for i, layer in enumerate(st.session_state["layers"]):
                 layer['rock_type'] = int(selected_opt[0])
 
             with rc2:
-                # Single UCS input for all rock options
                 layer['ucs_mpa'] = st.number_input("Uniaxial Compressive Strength UCS (MPa)", value=float(layer.get('ucs_mpa', 15.0)), key=f"ucs_{i}")
 
             if layer['rock_type'] == 1:
@@ -149,7 +147,6 @@ for i, layer in enumerate(st.session_state["layers"]):
                     ei_val = st.number_input("Intact Modulus Ei (MPa)", value=0.0, key=f"ei_{i}")
                     layer['Ei'] = ei_val if ei_val > 0 else None
 
-# Handle Layer Removal
 if layers_to_delete:
     for index in sorted(layers_to_delete, reverse=True):
         st.session_state["layers"].pop(index)
@@ -157,7 +154,7 @@ if layers_to_delete:
 
 st.write("")
 
-# BOTTOM BUTTONS: Add Layer & Clear
+# Add & Clear layer buttons
 col_b1, col_b2, _ = st.columns([1.3, 1.5, 3])
 with col_b1:
     if st.button("➕ Add Soil Layer", use_container_width=True):
@@ -197,10 +194,9 @@ if st.button("⚡ Run Geotechnical Analysis", type="primary", use_container_widt
 
         results_df, rock_df = calculate_pile_capacity(gen_inputs, st.session_state["layers"])
 
-        # KPI Metrics Summary
         total_depth = results_df['Depth (m)'].max() if not results_df.empty else 0.0
-        final_qu_comp = results_df['Ultimate Capacity Qu Comp (MN)'].iloc[-1] if not results_df.empty else 0.0
-        final_qa_comp = results_df['Allowable Capacity Qa Comp (MN)'].iloc[-1] if not results_df.empty else 0.0
+        final_qu_comp = results_df['Ultimate Bearing Resistance Qu (MN)'].iloc[-1] if not results_df.empty else 0.0
+        final_qa_comp = results_df['Allowable Bearing Capacity Qa (MN)'].iloc[-1] if not results_df.empty else 0.0
         final_qa_tens = results_df['Allowable Capacity Qa Tens (MN)'].iloc[-1] if not results_df.empty else 0.0
 
         st.markdown("### 📊 Performance Summary")
@@ -216,7 +212,12 @@ if st.button("⚡ Run Geotechnical Analysis", type="primary", use_container_widt
 
         with tab1:
             st.markdown("#### **Layer-by-Layer Calculation Sheet**")
-            st.dataframe(results_df.style.format(precision=3), use_container_width=True)
+            display_cols = [
+                'Depth (m)', 'Strata', 'Skin Friction Qs (kN)',
+                'End Bearing Resistance Qb (kN)', 'Ultimate Bearing Resistance Qu (MN)',
+                'Allowable Bearing Capacity Qa (MN)'
+            ]
+            st.dataframe(results_df[display_cols].style.format(precision=3), use_container_width=True)
 
             excel_bytes = generate_excel_report(gen_inputs, st.session_state["layers"], results_df, rock_df)
             st.download_button(
