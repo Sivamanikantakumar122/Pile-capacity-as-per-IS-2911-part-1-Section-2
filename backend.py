@@ -20,6 +20,7 @@ def get_n_gamma(phi: float) -> float:
 def calculate_pile_capacity(general_inputs: dict, layers: list):
     """
     Performs layer-by-layer pile capacity calculations per IS 2911 Part 1 Sec 2.
+    Cumulative overburden pressure (PD) is accumulated from top layers downwards.
     """
     D = general_inputs['pile_diameter']
     A_p = math.pi * (D ** 2) / 4.0
@@ -31,12 +32,10 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
 
     cumulative_Qs = 0.0
     cumulative_weight = 0.0
+    cumulative_PD = 0.0  # Cumulative Overburden Pressure across layers
 
     output_rows = []
     rock_inputs_list = []
-
-    # Identify all rock strata for multi-layer socket calculations
-    rock_layers = [l for l in layers if l['strata'] == 'Rock']
 
     for idx, layer in enumerate(layers):
         depth_from = layer['from']
@@ -44,9 +43,10 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         thickness = abs(depth_to - depth_from)
         strata = layer['strata']
 
-        # Effective Overburden Pressure (PDi)
+        # Cumulative Effective Overburden Pressure Calculation
         gamma_sub = layer.get('submerged_unit_weight', 0.0)
-        PDi = gamma_sub * thickness
+        layer_PDi = gamma_sub * thickness
+        cumulative_PD += layer_PDi
 
         # --- SAND STRATA ---
         if strata == 'Sand':
@@ -58,8 +58,9 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             else:
                 H_cr = 17.5 * D
 
+            # Capped Overburden at Critical Height
             PD_lim = gamma_sub * H_cr
-            PD = min(PDi, PD_lim)
+            PD = min(cumulative_PD, PD_lim)
 
             N_gamma = get_n_gamma(phi)
             N_q = 0.178 * math.exp(0.1609 * phi)
@@ -76,6 +77,7 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         # --- CLAY STRATA ---
         elif strata == 'Clay':
             Cu = layer.get('Cu', 0.0)
+            PD = cumulative_PD
 
             if Cu < 40:
                 alpha = 1.0
@@ -97,7 +99,6 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             rock_type = layer.get('rock_type', 1)
             ucs_mpa = layer.get('ucs_mpa', 0.0)
 
-            # Max socket length based on option
             if rock_type == 1:
                 desired_ls = 2.0 * D
             elif rock_type == 2:
@@ -144,10 +145,9 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
                 Cu2_calc = ucs_mpa
 
             else:  # Rock Option 2 & 3
-                # Determine Cu1 (UCS at socket end) and Cu2 (Average UCS across socket length)
                 socket_remaining = ls
                 weighted_ucs_sum = 0.0
-                Cu1_calc = ucs_mpa  # default fallback
+                Cu1_calc = ucs_mpa
 
                 curr_layer_index = layers.index(layer)
                 for r_idx in range(curr_layer_index, len(layers)):
@@ -163,14 +163,12 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
 
                     weighted_ucs_sum += r_ucs * penetration
                     socket_remaining -= penetration
-                    Cu1_calc = r_ucs  # Last rock layer reached by socket end defines Cu1
+                    Cu1_calc = r_ucs
 
                 Cu2_calc = (weighted_ucs_sum / ls) if ls > 0 else ucs_mpa
                 
                 Nc = 9.0
                 alpha_rock = 0.9
-                
-                # Formula: Qu = Cu1 * Nc * Ap + alpha * Cu2 * pi() * D * ls
                 Qu_rock_MN = (Cu1_calc * Nc * (math.pi * D ** 2 / 4.0)) + (alpha_rock * Cu2_calc * math.pi * D * ls)
 
             Qa_rock_MN = Qu_rock_MN / fos
@@ -193,7 +191,7 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         layer_weight = gamma_conc * A_p * thickness
         cumulative_weight += layer_weight
 
-        # Ultimate & Allowable Capacities
+        # Capacities
         Qu_comp_kN = cumulative_Qs + Qb_layer
         Qu_comp_MN = Qu_comp_kN / 1000.0
         Qa_comp_MN = Qu_comp_MN / fos
@@ -205,12 +203,13 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         output_rows.append({
             'Depth (m)': depth_to,
             'Strata': strata,
+            'Cumulative PD (kN/m²)': cumulative_PD,
             'Unit Skin Friction (kPa)': unit_skin_friction,
             'Skin Friction Qs (kN)': cumulative_Qs,
             'Unit End Bearing (kPa)': unit_end_bearing,
             'End Bearing Resistance Qb (kN)': Qb_layer,
-            'Ultimate Capacity Qu Comp (MN)': Qu_comp_MN,
-            'Allowable Capacity Qa Comp (MN)': Qa_comp_MN,
+            'Ultimate Bearing Resistance Qu (MN)': Qu_comp_MN,
+            'Allowable Bearing Capacity Qa (MN)': Qa_comp_MN,
             'Ultimate Capacity Qu Tens (MN)': Qu_tens_MN,
             'Allowable Capacity Qa Tens (MN)': Qa_tens_MN
         })
@@ -222,22 +221,62 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
 
 
 def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.DataFrame, rock_df: pd.DataFrame) -> bytes:
-    """Generates multi-sheet Excel file in memory."""
+    """Generates multi-sheet Excel file adhering strictly to requested input/output structures."""
     output = io.BytesIO()
+
+    # Sheet 1: Format clean layer inputs (hiding irrelevant blank fields per strata)
+    cleaned_layer_inputs = []
+    for l in layers:
+        item = {
+            'From (m)': l.get('from'),
+            'To (m)': l.get('to'),
+            'Strata': l.get('strata')
+        }
+        if l['strata'] in ['Sand', 'Clay']:
+            item['Submerged Unit Weight γ\' (kN/m³)'] = l.get('submerged_unit_weight', '')
+        if l['strata'] == 'Sand':
+            item['Phi (deg)'] = l.get('phi', '')
+        elif l['strata'] == 'Clay':
+            item['Cu (kPa)'] = l.get('Cu', '')
+        elif l['strata'] == 'Rock':
+            item['Rock Type'] = l.get('rock_type', '')
+            item['UCS (MPa)'] = l.get('ucs_mpa', '')
+            if l.get('rock_type') == 1:
+                item['Discontinuity Spacing (mm)'] = l.get('spacing_discontinuities', '')
+                item['RQD (%)'] = l.get('rqd', '')
+                item['Ed (MPa)'] = l.get('Ed', '')
+                item['Ei (MPa)'] = l.get('Ei', '')
+
+        cleaned_layer_inputs.append(item)
+
+    # Sheet 2: Standardized results sheet
+    sheet2_cols = [
+        'Depth (m)',
+        'Strata',
+        'Skin Friction Qs (kN)',
+        'End Bearing Resistance Qb (kN)',
+        'Ultimate Bearing Resistance Qu (MN)',
+        'Allowable Bearing Capacity Qa (MN)'
+    ]
+    sheet2_df = results_df[sheet2_cols] if not results_df.empty else pd.DataFrame()
+
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        pd.DataFrame([general_inputs]).to_excel(writer, sheet_name='General Inputs', index=False)
-        pd.DataFrame(layers).to_excel(writer, sheet_name='Layer Inputs', index=False)
-        results_df.to_excel(writer, sheet_name='Results', index=False)
+        # Sheet 1: General & Input Parameters
+        pd.DataFrame([general_inputs]).to_excel(writer, sheet_name='Sheet1_GeneralInputs', index=False)
+        pd.DataFrame(cleaned_layer_inputs).to_excel(writer, sheet_name='Sheet1_LayerInputs', index=False)
+
+        # Sheet 2: Calculation Results
+        sheet2_df.to_excel(writer, sheet_name='Sheet2_Results', index=False)
+
+        # Sheet 3: Rock Socket Information (if present)
         if not rock_df.empty:
-            rock_df.to_excel(writer, sheet_name='Rock Analysis', index=False)
+            rock_df.to_excel(writer, sheet_name='Sheet3_RockAnalysis', index=False)
 
     return output.getvalue()
 
 
 def create_plots(results_df: pd.DataFrame):
     """Generates Plotly graphs with X-axis on top and full outer borders."""
-    
-    # Common layout options for top X-axis and full borders
     def apply_chart_borders(fig, title, x_label):
         fig.update_layout(
             title=dict(text=title, x=0.5, xanchor='center'),
@@ -285,10 +324,10 @@ def create_plots(results_df: pd.DataFrame):
     ))
     apply_chart_borders(fig2, 'Ultimate End Bearing Resistance vs Depth', 'Qb (kN)')
 
-    # Plot 3: Ultimate Pile Capacity vs Depth (Compression vs Tension)
+    # Plot 3: Ultimate Pile Capacity vs Depth
     fig3 = go.Figure()
     fig3.add_trace(go.Scatter(
-        x=results_df['Ultimate Capacity Qu Comp (MN)'],
+        x=results_df['Ultimate Bearing Resistance Qu (MN)'],
         y=results_df['Depth (m)'],
         mode='lines+markers',
         name='Compression (Qu)',
