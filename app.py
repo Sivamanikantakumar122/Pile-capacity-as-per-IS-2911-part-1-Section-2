@@ -115,7 +115,7 @@ st.markdown("""
 # --------------------------
 # MAIN CONTENT: LAYER INPUTS
 # --------------------------
-st.markdown("### 🧱 Stratigraphy & Soil Layers")
+st.markdown("###  Stratigraphy & Soil Layers")
 
 if "layers" not in st.session_state:
     st.session_state["layers"] = []
