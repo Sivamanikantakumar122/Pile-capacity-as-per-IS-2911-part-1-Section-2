@@ -23,7 +23,6 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
     """
     D = general_inputs['pile_diameter']
     A_p = math.pi * (D ** 2) / 4.0
-    gw_depth = general_inputs['gw_depth']
     gamma_conc = general_inputs['gamma_concrete']
     fos = general_inputs['fos']
 
@@ -36,6 +35,9 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
     output_rows = []
     rock_inputs_list = []
 
+    # Identify all rock strata for multi-layer socket calculations
+    rock_layers = [l for l in layers if l['strata'] == 'Rock']
+
     for idx, layer in enumerate(layers):
         depth_from = layer['from']
         depth_to = layer['to']
@@ -46,7 +48,7 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
         gamma_sub = layer.get('submerged_unit_weight', 0.0)
         PDi = gamma_sub * thickness
 
-        # Sand Strata
+        # --- SAND STRATA ---
         if strata == 'Sand':
             phi = layer.get('phi', 0.0)
             if phi < 30:
@@ -71,10 +73,9 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             layer_Qs = unit_skin_friction * A_s
             cumulative_Qs += layer_Qs
 
-        # Clay Strata
+        # --- CLAY STRATA ---
         elif strata == 'Clay':
             Cu = layer.get('Cu', 0.0)
-            PD = PDi
 
             if Cu < 40:
                 alpha = 1.0
@@ -91,11 +92,12 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             layer_Qs = unit_skin_friction * A_s
             cumulative_Qs += layer_Qs
 
-        # Rock Strata
+        # --- ROCK STRATA ---
         else:
             rock_type = layer.get('rock_type', 1)
+            ucs_mpa = layer.get('ucs_mpa', 0.0)
 
-            # Socket length determination (1-2D for Opt 1, 2-3D for Opt 2, 3-4D for Opt 3)
+            # Max socket length based on option
             if rock_type == 1:
                 desired_ls = 2.0 * D
             elif rock_type == 2:
@@ -106,7 +108,6 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
             ls = min(thickness, desired_ls)
 
             if rock_type == 1:
-                ucs_mpa = layer.get('ucs_mpa', 0.0)
                 qc_ton_m2 = ucs_mpa * 101.97
                 spacing = layer.get('spacing_discontinuities', '>300')
                 if spacing == '>300':
@@ -139,31 +140,46 @@ def calculate_pile_capacity(general_inputs: dict, layers: list):
                 Qu_rock_tons = (qc_ton_m2 * N_j * N_d * A_p) + (qc_ton_m2 * math.pi * D * ls * alpha_r * beta_r)
                 Qu_rock_MN = Qu_rock_tons * 0.00980665
 
-                Cu1_display = ucs_mpa
-                Cu2_display = ucs_mpa
+                Cu1_calc = ucs_mpa
+                Cu2_calc = ucs_mpa
 
-            else:  # Rock Option 2 & Option 3
-                # Cu1: UCS at the end/tip of socket length
-                # Cu2: Average UCS over socket length
-                Cu1 = layer.get('Cu1', layer.get('ucs_mpa', 0.0))
-                Cu2 = layer.get('Cu2', layer.get('ucs_mpa', 0.0))
+            else:  # Rock Option 2 & 3
+                # Determine Cu1 (UCS at socket end) and Cu2 (Average UCS across socket length)
+                socket_remaining = ls
+                weighted_ucs_sum = 0.0
+                Cu1_calc = ucs_mpa  # default fallback
+
+                curr_layer_index = layers.index(layer)
+                for r_idx in range(curr_layer_index, len(layers)):
+                    if socket_remaining <= 0:
+                        break
+                    r_layer = layers[r_idx]
+                    if r_layer['strata'] != 'Rock':
+                        break
+
+                    r_thick = abs(r_layer['to'] - r_layer['from'])
+                    penetration = min(socket_remaining, r_thick)
+                    r_ucs = r_layer.get('ucs_mpa', 0.0)
+
+                    weighted_ucs_sum += r_ucs * penetration
+                    socket_remaining -= penetration
+                    Cu1_calc = r_ucs  # Last rock layer reached by socket end defines Cu1
+
+                Cu2_calc = (weighted_ucs_sum / ls) if ls > 0 else ucs_mpa
                 
                 Nc = 9.0
                 alpha_rock = 0.9
                 
-                # Qu = Cu1 * Nc * pi() * D^2 / 4 + alpha * Cu2 * pi() * D * ls
-                Qu_rock_MN = (Cu1 * Nc * (math.pi * D ** 2 / 4.0)) + (alpha_rock * Cu2 * math.pi * D * ls)
-
-                Cu1_display = Cu1
-                Cu2_display = Cu2
+                # Formula: Qu = Cu1 * Nc * Ap + alpha * Cu2 * pi() * D * ls
+                Qu_rock_MN = (Cu1_calc * Nc * (math.pi * D ** 2 / 4.0)) + (alpha_rock * Cu2_calc * math.pi * D * ls)
 
             Qa_rock_MN = Qu_rock_MN / fos
 
             rock_inputs_list.append({
                 'Layer Index': idx + 1,
                 'Rock Type Option': rock_type,
-                'Cu1 - Base UCS (MPa)': Cu1_display,
-                'Cu2 - Avg UCS (MPa)': Cu2_display,
+                'Cu1 - Base UCS (MPa)': Cu1_calc,
+                'Cu2 - Avg UCS (MPa)': Cu2_calc,
                 'Socket Length ls (m)': ls,
                 'Ultimate Capacity Qu (MN)': Qu_rock_MN,
                 'Allowable Capacity Qa (MN)': Qa_rock_MN
@@ -219,56 +235,72 @@ def generate_excel_report(general_inputs: dict, layers: list, results_df: pd.Dat
 
 
 def create_plots(results_df: pd.DataFrame):
-    """Generates Plotly graphical representations."""
+    """Generates Plotly graphs with X-axis on top and full outer borders."""
+    
+    # Common layout options for top X-axis and full borders
+    def apply_chart_borders(fig, title, x_label):
+        fig.update_layout(
+            title=dict(text=title, x=0.5, xanchor='center'),
+            yaxis_title='Depth (m)',
+            yaxis_autorange='reversed',
+            plot_bgcolor='white',
+            margin=dict(l=40, r=40, t=60, b=40)
+        )
+        fig.update_xaxes(
+            title=x_label,
+            side='top',
+            showline=True,
+            linewidth=1.5,
+            linecolor='black',
+            mirror=True,
+            gridcolor='#f0f0f0'
+        )
+        fig.update_yaxes(
+            showline=True,
+            linewidth=1.5,
+            linecolor='black',
+            mirror=True,
+            gridcolor='#f0f0f0'
+        )
+
+    # Plot 1: Unit Skin Friction vs Depth
     fig1 = go.Figure()
     fig1.add_trace(go.Scatter(
         x=results_df['Unit Skin Friction (kPa)'],
         y=results_df['Depth (m)'],
         mode='lines+markers',
-        name='Unit Skin Friction'
+        name='Unit Skin Friction',
+        line=dict(color='#1e3c72', width=2)
     ))
-    fig1.update_layout(
-        title='Unit Skin Friction vs Depth',
-        xaxis_title='Unit Skin Friction (kPa)',
-        yaxis_title='Depth (m)',
-        yaxis_autorange='reversed'
-    )
+    apply_chart_borders(fig1, 'Unit Skin Friction vs Depth', 'Unit Skin Friction (kPa)')
 
+    # Plot 2: Ultimate End Bearing Resistance vs Depth
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
         x=results_df['End Bearing Resistance Qb (kN)'],
         y=results_df['Depth (m)'],
         mode='lines+markers',
         name='End Bearing (Qb)',
-        line=dict(color='orange')
+        line=dict(color='#ff7f0e', width=2)
     ))
-    fig2.update_layout(
-        title='Ultimate End Bearing Resistance vs Depth',
-        xaxis_title='Qb (kN)',
-        yaxis_title='Depth (m)',
-        yaxis_autorange='reversed'
-    )
+    apply_chart_borders(fig2, 'Ultimate End Bearing Resistance vs Depth', 'Qb (kN)')
 
+    # Plot 3: Ultimate Pile Capacity vs Depth (Compression vs Tension)
     fig3 = go.Figure()
     fig3.add_trace(go.Scatter(
         x=results_df['Ultimate Capacity Qu Comp (MN)'],
         y=results_df['Depth (m)'],
         mode='lines+markers',
         name='Compression (Qu)',
-        line=dict(color='green')
+        line=dict(color='#2ca02c', width=2)
     ))
     fig3.add_trace(go.Scatter(
         x=results_df['Ultimate Capacity Qu Tens (MN)'],
         y=results_df['Depth (m)'],
         mode='lines+markers',
         name='Tension (Qu)',
-        line=dict(color='red', dash='dash')
+        line=dict(color='#d62728', width=2, dash='dash')
     ))
-    fig3.update_layout(
-        title='Ultimate Pile Capacity vs Depth',
-        xaxis_title='Capacity (MN)',
-        yaxis_title='Depth (m)',
-        yaxis_autorange='reversed'
-    )
+    apply_chart_borders(fig3, 'Ultimate Pile Capacity vs Depth', 'Capacity (MN)')
 
     return fig1, fig2, fig3
