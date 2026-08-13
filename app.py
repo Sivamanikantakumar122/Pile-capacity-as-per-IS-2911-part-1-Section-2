@@ -8,7 +8,7 @@ from backend import calculate_pile_capacity, generate_excel_report, create_plots
 # PAGE CONFIG & STYLING
 # --------------------------
 st.set_page_config(
-    page_title="Pile Capacity- IS 2911",
+    page_title="Pile Capacity - IS 2911",
     page_icon="🏗️",
     layout="wide"
 )
@@ -35,15 +35,6 @@ st.markdown("""
     }
     section[data-testid="stSidebar"] { background-color: #f1f5f9; }
     div.stButton > button { border-radius: 8px; font-weight: 600; }
-    
-    /* Summary Card Styling */
-    .report-card {
-        background-color: white;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #e2e8f0;
-        margin-bottom: 20px;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -51,14 +42,14 @@ st.markdown("""
 # SIDEBAR METADATA & PARAMS
 # --------------------------
 with st.sidebar:
-    st.markdown("### 🏗️ **IS 2911 Pile Capacity**")
+    st.markdown("### 🏗️ **Pile Capacity**")
     st.caption("Bored Cast-in-situ Concrete Piles (Part 1 Sec 2)")
     st.markdown("**Developed by:** Siva Manikanta kumar")
     st.markdown("---")
 
     st.subheader("📋 Project Info")
-    project_name = st.text_input("Project Name", value="", placeholder="e.g. Metro ")
-    project_Location = st.text_input("Project Location", value="", placeholder="e.g. Attili ")
+    project_name = st.text_input("Project Name", value="", placeholder="e.g. Metro")
+    project_location = st.text_input("Project Location", value="", placeholder="e.g. Attili")
     designer_name = st.text_input("Designer Name", value="", placeholder="e.g. Siva")
     bh_number = st.text_input("Borehole ID", value="", placeholder="e.g. BH-02")
 
@@ -78,7 +69,7 @@ with st.sidebar:
 # --------------------------
 st.markdown("""
     <div class="hero-banner">
-        <h1>Pile Capacity </h1>
+        <h1>Pile Capacity Engine</h1>
         <p>Comprehensive axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2.</p>
         <span class="badge">IS 2911:2010</span>
         <span class="badge">Soil & Rock Strata</span>
@@ -87,9 +78,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------------------------
-# SOIL PROFILE
+# SOIL PROFILE INPUTS
 # --------------------------
-st.markdown("###  Stratigraphy & Soil Layers")
+st.markdown("### 🧱 Stratigraphy & Soil Layers")
 
 if "layers" not in st.session_state:
     st.session_state["layers"] = []
@@ -165,7 +156,7 @@ if layers_to_delete:
 
 st.write("")
 
-# Add & Clear layer buttons
+# Add & Clear Buttons
 col_b1, col_b2, _ = st.columns([1.3, 1.5, 3])
 with col_b1:
     if st.button("➕ Add Soil Layer", use_container_width=True):
@@ -194,6 +185,7 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
     else:
         gen_inputs = {
             'project_name': project_name if project_name else "N/A",
+            'project_location': project_location if project_location else "N/A",
             'designer': designer_name if designer_name else "N/A",
             'bh_number': bh_number if bh_number else "N/A",
             'pile_diameter': pile_diameter,
@@ -203,20 +195,36 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             'fos': fos
         }
 
-        results_df, rock_df = calculate_pile_capacity(gen_inputs, st.session_state["layers"])
+        soil_df, rock_df = calculate_pile_capacity(gen_inputs, st.session_state["layers"])
 
-        total_depth = results_df['Depth (m)'].max() if not results_df.empty else 0.0
-        final_qu_comp = results_df['Ultimate Bearing Resistance Qu (MN)'].iloc[-1] if not results_df.empty else 0.0
-        final_qa_comp = results_df['Allowable Bearing Capacity Qa (MN)'].iloc[-1] if not results_df.empty else 0.0
-        final_qu_tens = results_df['Ultimate Capacity Qu Tens (MN)'].iloc[-1] if not results_df.empty else 0.0
-        final_qa_tens = results_df['Allowable Capacity Qa Tens (MN)'].iloc[-1] if not results_df.empty else 0.0
+        # SOIL CAPACITY VALUES
+        total_soil_depth = soil_df['Depth (m)'].max() if not soil_df.empty else 0.0
+        soil_qu_comp = soil_df['Ultimate Bearing Resistance Qu (MN)'].iloc[-1] if not soil_df.empty else 0.0
+        soil_qa_comp = soil_df['Allowable Bearing Capacity Qa (MN)'].iloc[-1] if not soil_df.empty else 0.0
+        soil_qa_tens = soil_df['Allowable Capacity Qa Tens (MN)'].iloc[-1] if not soil_df.empty else 0.0
 
         st.markdown("### 📊 Performance Summary")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Depth", f"{total_depth:.2f} m")
-        m2.metric("Ult. Compression (Qu)", f"{final_qu_comp:.2f} MN")
-        m3.metric("Allow. Compression (Qa)", f"{final_qa_comp:.2f} MN", delta=f"FOS = {fos}")
-        m4.metric("Allow. Tension (Qa)", f"{final_qa_tens:.2f} MN")
+
+        # 1. Soil Capacity Summary
+        st.markdown("##### **1. Soil Capacity Summary**")
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Total Depth in Soil", f"{total_soil_depth:.2f} m")
+        s2.metric("Soil Ult. Compression (Qu)", f"{soil_qu_comp:.2f} MN")
+        s3.metric("Soil Allow. Compression (Qa)", f"{soil_qa_comp:.2f} MN", delta=f"FOS = {fos}")
+        s4.metric("Soil Allow. Tension (Qa)", f"{soil_qa_tens:.2f} MN")
+
+        # 2. Rock Socket Summary (if rock exists)
+        if not rock_df.empty:
+            st.write("")
+            st.markdown("##### **2. Rock Socket Capacity Summary**")
+            r1, r2, r3 = st.columns(3)
+            rock_ls = rock_df['Socket Length Taken ls (m)'].iloc[0]
+            rock_qu = rock_df['Ultimate Rock Capacity Qu (MN)'].iloc[0]
+            rock_qa = rock_df['Allowable Rock Capacity Qa (MN)'].iloc[0]
+
+            r1.metric("Socketed Depth in Rock", f"{rock_ls:.2f} m")
+            r2.metric("Rock Ult. Compression (Qu)", f"{rock_qu:.2f} MN")
+            r3.metric("Rock Allow. Compression (Qa)", f"{rock_qa:.2f} MN", delta=f"FOS = {fos}")
 
         st.write("")
 
@@ -228,25 +236,28 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             "📄 Design Summary Report"
         ])
 
-        # TAB 1: Capacity Table
+        # TAB 1: Soil Results Table Only
         with tab1:
-            st.markdown("#### **Layer-by-Layer Calculation Sheet**")
-            display_cols = [
-                'Depth (m)', 
-                'Thickness (m)',
-                'Strata',
-                'Uncapped PD (kN/m²)',
-                'Critical Height Hcr (m)',
-                'Cumulative PD Lim (kN/m²)',
-                'Effective Overburden Pressure PD (kN/m²)',
-                'Skin Friction Qs (kN)',
-                'End Bearing Resistance Qb (kN)', 
-                'Ultimate Bearing Resistance Qu (MN)',
-                'Allowable Bearing Capacity Qa (MN)'
-            ]
-            st.dataframe(results_df[display_cols], use_container_width=True)
+            st.markdown("#### **Soil Layer-by-Layer Calculation Sheet**")
+            if not soil_df.empty:
+                display_cols = [
+                    'Depth (m)', 
+                    'Thickness (m)',
+                    'Strata',
+                    'Uncapped PD (kN/m²)',
+                    'Critical Height Hcr (m)',
+                    'Cumulative PD Lim (kN/m²)',
+                    'Effective Overburden Pressure PD (kN/m²)',
+                    'Skin Friction Qs (kN)',
+                    'End Bearing Resistance Qb (kN)', 
+                    'Ultimate Bearing Resistance Qu (MN)',
+                    'Allowable Bearing Capacity Qa (MN)'
+                ]
+                st.dataframe(soil_df[display_cols], use_container_width=True)
+            else:
+                st.info("No soil strata defined in the inputs.", icon="ℹ️")
 
-            excel_bytes = generate_excel_report(gen_inputs, st.session_state["layers"], results_df, rock_df)
+            excel_bytes = generate_excel_report(gen_inputs, st.session_state["layers"], soil_df, rock_df)
             st.download_button(
                 label="📥 Download Detailed Excel Report",
                 data=excel_bytes,
@@ -254,10 +265,10 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-        # TAB 2: Curves
+        # TAB 2: Curves (Soil)
         with tab2:
-            st.markdown("#### **Performance Profile Graphs**")
-            fig1, fig2, fig3 = create_plots(results_df)
+            st.markdown("#### **Performance Profile Graphs (Soil)**")
+            fig1, fig2, fig3 = create_plots(soil_df)
             
             g_col1, g_col2 = st.columns(2)
             with g_col1:
@@ -266,27 +277,27 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             with g_col2:
                 st.plotly_chart(fig3, use_container_width=True)
 
-        # TAB 3: Rock Details
+        # TAB 3: Rock Socket Details Only
         with tab3:
+            st.markdown("#### **Rock Socket Parameters & Capacity Summary**")
             if not rock_df.empty:
-                st.markdown("#### **Rock Socket Parameters & Capacity Summary**")
                 st.dataframe(rock_df.style.format(precision=3), use_container_width=True)
             else:
                 st.info("No rock strata identified in the inputs.", icon="ℹ️")
 
-        # TAB 4: DESIGN SUMMARY REPORT
+        # TAB 4: Design Summary Report
         with tab4:
             st.markdown("## 📄 Design Summary Report")
-            st.info("💡 **Tip:** Use the download button in Tab 1 to export full multi-sheet calculation tables.", icon="💡")
             st.markdown("---")
 
             # Project Information
             st.markdown("### **PROJECT INFORMATION**")
             st.markdown(f"* **Project:** {project_name if project_name else 'N/A'}")
+            st.markdown(f"* **Location:** {project_location if project_location else 'N/A'}")
             st.markdown(f"* **Designer:** {designer_name if designer_name else 'N/A'}")
             st.markdown(f"* **Borehole ID / Site:** {bh_number if bh_number else 'N/A'}")
             st.markdown(f"* **Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            st.markdown("* **Standard / Software:** IS 2911 Part 1 Sec 2 Engine v1.0")
+            st.markdown("* **Standard / Engine:** IS 2911 Part 1 Sec 2 Engine v1.0")
 
             st.markdown("---")
 
@@ -294,7 +305,9 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             st.markdown("### **PILE PROPERTIES**")
             st.markdown(f"* **Diameter (D):** {pile_diameter:.3f} m")
             st.markdown(f"* **Cross-sectional Area (Ap):** {pile_area:.4f} m²")
-            st.markdown(f"* **Embedded Length / Max Depth:** {total_depth:.2f} m")
+            st.markdown(f"* **Soil Depth Analyzed:** {total_soil_depth:.2f} m")
+            if not rock_df.empty:
+                st.markdown(f"* **Rock Socket Length (ls):** {rock_df['Socket Length Taken ls (m)'].iloc[0]:.2f} m")
             st.markdown("* **Type:** Bored Cast-in-situ Concrete Pile")
             st.markdown(f"* **Concrete Unit Density:** {gamma_concrete:.1f} kN/m³")
             st.markdown(f"* **Factor of Safety (FOS):** {fos}")
@@ -302,21 +315,18 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             st.markdown("---")
 
             # Stratigraphy & Soil Profile
-            st.markdown("### **STRATIGRAPHY & SOIL PROFILE**")
+            st.markdown("### **STRATIGRAPHY PROFILE**")
             st.markdown(f"* **Ground Water Depth:** {gw_depth:.2f} m")
-            st.markdown(f"* **Number of Layers:** {len(st.session_state['layers'])}")
+            st.markdown(f"* **Total Layers Input:** {len(st.session_state['layers'])}")
             st.markdown("**Subsurface Layer Details:**")
 
             for l_idx, l in enumerate(st.session_state["layers"]):
                 strata_type = l['strata']
-                depth_from = l['from']
-                depth_to = l['to']
                 st.markdown(f"**{l_idx+1}. Layer {l_idx+1} ({strata_type.lower()})**")
-                st.markdown(f"  * **Depth:** {depth_from:.2f} - {depth_to:.2f} m")
+                st.markdown(f"  * **Depth:** {l['from']:.2f} - {l['to']:.2f} m")
                 
                 if strata_type in ['Sand', 'Clay']:
                     st.markdown(f"  * **Submerged Unit Weight γ':** {l.get('submerged_unit_weight', 0.0):.2f} kN/m³")
-                
                 if strata_type == 'Sand':
                     st.markdown(f"  * **Internal Friction Angle (ϕ):** {l.get('phi', 0.0):.1f}°")
                 elif strata_type == 'Clay':
@@ -327,27 +337,24 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
 
             st.markdown("---")
 
-            # Analysis Parameters
-            st.markdown("### **ANALYSIS PARAMETERS**")
-            st.markdown("* **Design Standard:** IS 2911 (Part 1 / Section 2)")
-            st.markdown("* **Methodology:** Static Formulae ")
-            st.markdown("* **Loading Conditions:** Static Compression & Tension")
-            st.markdown(f"* **Max Depth Analyzed:** {total_depth:.2f} m")
-
-            st.markdown("---")
-
-            # Capacity Results
-            st.markdown("### **CAPACITY RESULTS**")
+            # Capacity Results Summary
+            st.markdown("### **CAPACITY RESULTS SUMMARY**")
             
             c_res1, c_res2 = st.columns(2)
             with c_res1:
-                st.markdown("#### **Compression**")
-                st.markdown(f"* **Ultimate Capacity (Qu):** {final_qu_comp:.3f} MN ({final_qu_comp*1000:.1f} kN)")
-                st.markdown(f"* **Allowable Capacity (Qa):** {final_qa_comp:.3f} MN ({final_qa_comp*1000:.1f} kN)")
-                st.markdown(f"* **Factor of Safety (FOS):** {fos}")
+                st.markdown("#### **Soil Capacities**")
+                st.markdown(f"* **Soil Ult. Compression Capacity (Qu):** {soil_qu_comp:.3f} MN ({soil_qu_comp*1000:.1f} kN)")
+                st.markdown(f"* **Soil Allow. Compression Capacity (Qa):** {soil_qa_comp:.3f} MN ({soil_qa_comp*1000:.1f} kN)")
+                st.markdown(f"* **Soil Allow. Tension Capacity (Qa):** {soil_qa_tens:.3f} MN ({soil_qa_tens*1000:.1f} kN)")
 
             with c_res2:
-                st.markdown("#### **Tension (Uplift)**")
-                st.markdown(f"* **Ultimate Tension Capacity (Qu):** {final_qu_tens:.3f} MN ({final_qu_tens*1000:.1f} kN)")
-                st.markdown(f"* **Allowable Tension Capacity (Qa):** {final_qa_tens:.3f} MN ({final_qa_tens*1000:.1f} kN)")
-                st.markdown(f"* **Factor of Safety (FOS):** {fos}")
+                if not rock_df.empty:
+                    st.markdown("#### **Rock Socket Capacities**")
+                    st.markdown(f"* **Socket Length (ls):** {rock_df['Socket Length Taken ls (m)'].iloc[0]:.2f} m")
+                    st.markdown(f"* **Cu1 (Base UCS):** {rock_df['Cu1 - Base UCS (MPa)'].iloc[0]:.2f} MPa")
+                    st.markdown(f"* **Cu2 (Avg UCS):** {rock_df['Cu2 - Avg UCS (MPa)'].iloc[0]:.2f} MPa")
+                    st.markdown(f"* **Rock Ult. Capacity (Qu):** {rock_df['Ultimate Rock Capacity Qu (MN)'].iloc[0]:.3f} MN")
+                    st.markdown(f"* **Rock Allow. Capacity (Qa):** {rock_df['Allowable Rock Capacity Qa (MN)'].iloc[0]:.3f} MN")
+                else:
+                    st.markdown("#### **Rock Socket Capacities**")
+                    st.markdown("*No rock strata evaluated.*")
