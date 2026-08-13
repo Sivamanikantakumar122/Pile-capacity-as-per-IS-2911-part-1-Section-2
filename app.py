@@ -80,7 +80,7 @@ st.markdown("""
 # --------------------------
 # SOIL PROFILE INPUTS
 # --------------------------
-st.markdown("### Stratigraphy & Soil Layers")
+st.markdown("### Soil profile ")
 
 if "layers" not in st.session_state:
     st.session_state["layers"] = []
