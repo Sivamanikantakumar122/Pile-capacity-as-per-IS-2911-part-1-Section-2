@@ -167,10 +167,10 @@ for i, layer in enumerate(st.session_state["layers"]):
                 with rc4:
                     layer['rqd'] = st.number_input("RQD (%)", value=80, min_value=0, max_value=100, key=f"rqd_{i}")
                 with rc5:
-                    ed_val = st.number_input("In-situ Modulus Ed (MPa)", value=0.0, key=f"ed_{i}")
+                    ed_val = st.number_input("In-situ Modulus Ed (MPa) (optional)", value=0.0, key=f"ed_{i}")
                     layer['Ed'] = ed_val if ed_val > 0 else None
                 with rc6:
-                    ei_val = st.number_input("Intact Modulus Ei (MPa)", value=0.0, key=f"ei_{i}")
+                    ei_val = st.number_input("Intact Modulus Ei (MPa) (optional)", value=0.0, key=f"ei_{i}")
                     layer['Ei'] = ei_val if ei_val > 0 else None
 
 if layers_to_delete:
