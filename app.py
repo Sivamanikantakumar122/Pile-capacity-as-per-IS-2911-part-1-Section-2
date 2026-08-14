@@ -59,8 +59,8 @@ def get_image_base64(file_path):
 # SIDEBAR METADATA & PARAMS
 # --------------------------
 with st.sidebar:
-    st.markdown("### 🏗️ **IS 2911 Pile Capacity**")
-    st.caption("Bored Cast-in-situ Concrete Piles (Part 1 Sec 2)")
+    st.markdown("### 🏗️ **Pile Capacity**")
+    st.caption("Bored Cast-in-situ Concrete Piles as per Indian standard")
     st.markdown("**Developed by:** Siva Manikanta kumar")
     st.markdown("---")
 
@@ -87,8 +87,7 @@ with st.sidebar:
 st.markdown("""
     <div class="hero-banner">
         <h1>Pile Capacity </h1>
-        <p>Comprehensive axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2.</p>
-        <span class="badge">IS 2911:2010</span>
+        <p>Axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2 and IS 14593</p>
         <span class="badge">Soil & Rock Strata</span>
         <span class="badge">Interactive Curves</span>
     </div>
