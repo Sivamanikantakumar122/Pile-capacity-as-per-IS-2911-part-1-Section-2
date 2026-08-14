@@ -311,7 +311,7 @@ if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
             st.markdown(f"* **Location:** {project_location if project_location else 'N/A'}")
             st.markdown(f"* **Designer:** {designer_name if designer_name else 'N/A'}")
             st.markdown(f"* **Borehole ID :** {bh_number if bh_number else 'N/A'}")
-            st.markdown(f"* **Date :** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            st.markdown(f"* **Date :** {datetime.datetime.now().strftime('%d/%m/%Y')}")
             st.markdown("* **Standard :** IS 2911 Part 1 Sec 2 and IS 14593 ")
 
             st.markdown("---")
