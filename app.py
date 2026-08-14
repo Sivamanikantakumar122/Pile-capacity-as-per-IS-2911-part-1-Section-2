@@ -77,7 +77,7 @@ with st.sidebar:
     pile_area = math.pi * (pile_diameter ** 2) / 4.0
     st.info(f"📐 **Pile Area (Ap):** `{pile_area:.4f} m²`", icon="ℹ️")
 
-    gw_depth = st.number_input("Ground Water Depth (m)", min_value=0.0, value=2.0, step=0.5)
+    gw_depth = st.number_input("Ground Water Depth (m) (Take at ground level i.e, 0 m)", min_value=0.0, value=2.0, step=0.5)
     gamma_concrete = st.number_input("Concrete Density (kN/m³)", min_value=15.0, value=24.0, step=0.5)
     fos = st.select_slider("Factor of Safety (FOS)", options=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0], value=2.5)
 
