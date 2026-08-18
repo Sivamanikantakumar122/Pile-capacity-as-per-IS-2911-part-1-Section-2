@@ -1,504 +1,721 @@
-import io
+import base64
+import datetime
 import math
-import numpy as np
+import os
 import pandas as pd
-import plotly.graph_objects as go
+import streamlit as st
 
-PHI_TABLE = [0, 5, 10, 15, 20, 25, 30, 35, 40]
-N_GAMMA_TABLE = [0, 0.45, 1.22, 2.65, 5.39, 10.88, 22.4, 48.03, 109.41]
+from backend import (
+    calculate_lateral_capacity,
+    calculate_pile_capacity,
+    create_plots,
+    generate_excel_report,
+)
+
+# --------------------------
+# PAGE CONFIG & STYLING
+# --------------------------
+st.set_page_config(
+    page_title="Pile Capacity",
+    page_icon="🏗️",
+    layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+    .main { background-color: #f8f9fa; }
+    .hero-banner {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        padding: 24px 30px;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .hero-banner h1 { color: white !important; font-weight: 700; margin-bottom: 5px !important; }
+    .hero-banner p { color: #d0e1fd; font-size: 1.05rem; margin-bottom: 12px; }
+    .badge {
+        background-color: rgba(255, 255, 255, 0.2);
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+    section[data-testid="stSidebar"] { background-color: #f1f5f9; }
+    div.stButton > button { border-radius: 8px; font-weight: 600; }
+    .header-icon {
+        width: 32px;
+        height: 32px;
+        vertical-align: middle;
+        margin-right: 10px;
+        border-radius: 4px;
+        object-fit: cover;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
 
 
-def get_n_gamma(phi: float) -> float:
-  """Interpolate N_gamma based on internal friction angle phi."""
-  if phi <= 0:
-    return 0.0
-  if phi >= 40:
-    return 109.41
-  return float(np.interp(phi, PHI_TABLE, N_GAMMA_TABLE))
+def get_image_base64(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode()
+    return None
 
 
-def calculate_pile_capacity(general_inputs: dict, layers: list):
-  """Performs pile capacity calculations per IS 2911 Part 1 Sec 2[cite: 41, 85]."""
-  D = general_inputs['pile_diameter']
-  A_p = math.pi * (D**2) / 4.0
-  gamma_conc = general_inputs['gamma_concrete']
-  fos = general_inputs['fos']
+# --------------------------
+# SIDEBAR METADATA & MODE SELECTION
+# --------------------------
+with st.sidebar:
+    st.markdown("### 🏗️ **Pile Capacity**")
+    st.caption("Bored Cast-in-situ Concrete Piles as per Indian standard")
+    st.markdown("**Developed by:** Siva Manikanta kumar")
+    st.markdown("---")
 
-  K_i = 1.0
-  N_c_default = 9.0
+    analysis_mode = st.radio(
+        "Select Analysis Mode:",
+        ["Axial Capacity", "Lateral Capacity of pile"],
+        index=0,
+    )
+    st.markdown("---")
 
-  cumulative_Qs_soil = 0.0
-  cumulative_weight_soil = 0.0
-  cumulative_PD = 0.0
-  cumulative_PD_lim = 0.0
-
-  soil_output_rows = []
-
-  soil_layers = [l for l in layers if l['strata'] in ['Sand', 'Clay']]
-  rock_layers = [l for l in layers if l['strata'] == 'Rock']
-
-  # 1. SOIL CAPACITY CALCULATIONS
-  for idx, layer in enumerate(soil_layers):
-    depth_from = layer['from']
-    depth_to = layer['to']
-    thickness = abs(depth_to - depth_from)
-    strata = layer['strata']
-    gamma_sub = layer.get('submerged_unit_weight', 0.0)
-
-    layer_PDi = gamma_sub * thickness
-    cumulative_PD += layer_PDi
-
-    if strata == 'Sand':
-      phi = layer.get('phi', 0.0)
-      if phi < 30:
-        H_cr = 15.0 * D
-      elif phi <= 40:
-        H_cr = 17.5 * D
-      else:
-        H_cr = 20.0 * D
-
-      delta_PD_lim = gamma_sub * H_cr
-      cumulative_PD_lim += delta_PD_lim
-
-      PD = min(cumulative_PD, cumulative_PD_lim)
-      hcr_display = H_cr
-      pd_lim_display = cumulative_PD_lim
-
-      N_gamma = get_n_gamma(phi)
-      N_q = 0.178 * math.exp(0.1609 * phi)
-      delta = math.radians(phi)
-      A_s = math.pi * D * thickness
-
-      unit_end_bearing = (0.5 * D * gamma_sub * N_gamma) + (PD * N_q)
-      Qb_layer = A_p * unit_end_bearing
-
-      unit_skin_friction = K_i * PD * math.tan(delta)
-      layer_Qs = unit_skin_friction * A_s
-      cumulative_Qs_soil += layer_Qs
-
-    else:  # Clay
-      Cu = layer.get('Cu', 0.0)
-      PD = cumulative_PD
-      cumulative_PD_lim += layer_PDi
-
-      hcr_display = 'N/A'
-      pd_lim_display = 'N/A'
-
-      if Cu < 40:
-        alpha = 1.0
-      elif 40 <= Cu <= 200:
-        alpha = 0.23 + 0.77 * math.exp(-0.023 * (Cu - 40))
-      else:
-        alpha = 0.23
-
-      A_s = math.pi * D * thickness
-      unit_end_bearing = N_c_default * Cu
-      Qb_layer = A_p * unit_end_bearing
-
-      unit_skin_friction = alpha * Cu
-      layer_Qs = unit_skin_friction * A_s
-      cumulative_Qs_soil += layer_Qs
-
-    layer_weight = gamma_conc * A_p * thickness
-    cumulative_weight_soil += layer_weight
-
-    Qu_comp_kN = cumulative_Qs_soil + Qb_layer
-    Qu_comp_MN = Qu_comp_kN / 1000.0
-    Qa_comp_MN = Qu_comp_MN / fos
-
-    Qu_tens_kN = cumulative_weight_soil + cumulative_Qs_soil
-    Qu_tens_MN = Qu_tens_kN / 1000.0
-    Qa_tens_MN = Qu_tens_MN / fos
-
-    soil_output_rows.append({
-        'Depth (m)': depth_to,
-        'Thickness (m)': thickness,
-        'Strata': strata,
-        'Uncapped PD (kN/m²)': cumulative_PD,
-        'Critical Height Hcr (m)': hcr_display,
-        'Cumulative PD Lim (kN/m²)': pd_lim_display,
-        'Effective Overburden Pressure PD (kN/m²)': PD,
-        'Unit Skin Friction (kPa)': unit_skin_friction,
-        'Skin Friction Qs (kN)': cumulative_Qs_soil,
-        'Unit End Bearing (kPa)': unit_end_bearing,
-        'End Bearing Resistance Qb (kN)': Qb_layer,
-        'Ultimate Bearing Resistance Qu (MN)': Qu_comp_MN,
-        'Allowable Bearing Capacity Qa (MN)': Qa_comp_MN,
-        'Ultimate Capacity Qu Tens (MN)': Qu_tens_MN,
-        'Allowable Capacity Qa Tens (MN)': Qa_tens_MN,
-    })
-
-  soil_df = pd.DataFrame(soil_output_rows)
-
-  # 2. ROCK SOCKET CALCULATIONS
-  rock_summary = None
-
-  if rock_layers:
-    first_rock = rock_layers[0]
-    rock_type = first_rock.get('rock_type', 1)
-
-    if rock_type == 1:
-      req_ls = 2.0 * D
-      option_desc = f'Option 1 - Sound Rock (2D = {req_ls:.2f} m)'
-    elif rock_type == 2:
-      req_ls = 3.0 * D
-      option_desc = f'Option 2 - Moderately Weathered (3D = {req_ls:.2f} m)'
-    else:
-      req_ls = 4.0 * D
-      option_desc = f'Option 3 - Soft / Sedimentary Rock (4D = {req_ls:.2f} m)'
-
-    socket_remaining = req_ls
-    actual_ls = 0.0
-    spanned_ucs_list = []
-    Cu1_calc = first_rock.get('ucs_mpa', 0.0)
-
-    for r_layer in rock_layers:
-      if socket_remaining <= 0:
-        break
-      r_thick = abs(r_layer['to'] - r_layer['from'])
-      penetration = min(socket_remaining, r_thick)
-      r_ucs = r_layer.get('ucs_mpa', 0.0)
-
-      spanned_ucs_list.append(r_ucs)
-      actual_ls += penetration
-      socket_remaining -= penetration
-      Cu1_calc = r_ucs
-
-    avg_ucs_mpa = (
-        (sum(spanned_ucs_list) / len(spanned_ucs_list))
-        if spanned_ucs_list
-        else Cu1_calc
+    st.subheader("📋 Project Info")
+    project_name = st.text_input(
+        "Project Name", value="", placeholder="e.g. Metro"
+    )
+    project_location = st.text_input(
+        "Project Location", value="", placeholder="e.g. Attili"
+    )
+    bh_number = st.text_input("Borehole ID", value="", placeholder="e.g. BH-02")
+    designer_name = st.text_input(
+        "Designer Name", value="", placeholder="e.g. Siva"
     )
 
-    if rock_type == 1:
-      qc_ton_m2 = avg_ucs_mpa * 101.97
-      spacing = first_rock.get('spacing_discontinuities', '>300')
-      N_j = 0.4 if spacing == '>300' else (0.25 if spacing == '100-300' else 0.1)
-      N_d = 0.8 + 0.2 * (actual_ls / D)
-      alpha_r = 5.0 / math.sqrt(avg_ucs_mpa) if avg_ucs_mpa > 0 else 0
+    st.markdown("---")
+    st.subheader("⚙️ General Parameters")
 
-      ed = first_rock.get('Ed', None)
-      ei = first_rock.get('Ei', None)
-      rqd = first_rock.get('rqd', 80)
+    pile_diameter = st.number_input(
+        "Pile Diameter, D (m)",
+        min_value=0.1,
+        max_value=5.0,
+        value=1.0,
+        step=0.1,
+    )
+    pile_area = math.pi * (pile_diameter**2) / 4.0
+    st.info(f"📐 **Pile Area (Ap):** `{pile_area:.4f} m²`", icon="ℹ️")
 
-      if ed and ei and ei != 0:
-        j_val = ed / ei
-      else:
-        j_val = (
-            0.2
-            if rqd < 50
-            else (0.35 if rqd <= 75 else (0.65 if rqd <= 90 else 1.0))
+    gw_depth = st.number_input(
+        "Ground Water Depth (m)", min_value=0.0, value=2.0, step=0.5
+    )
+    gamma_concrete = st.number_input(
+        "Concrete Density (kN/m³)", min_value=15.0, value=24.0, step=0.5
+    )
+    fos = st.select_slider(
+        "Factor of Safety (FOS)",
+        options=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
+        value=2.5,
+    )
+
+# ==============================================================================
+# 1. AXIAL CAPACITY WORKFLOW
+# ==============================================================================
+if analysis_mode == "Axial Capacity":
+    st.markdown(
+        """
+        <div class="hero-banner">
+            <h1>Pile Capacity </h1>
+            <p>Axial bearing & rock socket capacity analysis strictly adhering to IS 2911 Part 1 Sec 2 and IS 14593</p>
+            <span class="badge">Soil & Rock Strata</span>
+            <span class="badge">Interactive Curves</span>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    img_b64 = get_image_base64("soil_icon.png")
+
+    if img_b64:
+        st.markdown(
+            f'### <img src="data:image/png;base64,{img_b64}" class="header-icon">'
+            " Stratigraphy & Soil Layers",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown("### ⛰️ Soil profile")
+
+    if "layers" not in st.session_state:
+        st.session_state["layers"] = []
+
+    layers_to_delete = []
+
+    for i, layer in enumerate(st.session_state["layers"]):
+        if i > 0:
+            layer["from"] = st.session_state["layers"][i - 1]["to"]
+
+        icon = (
+            "🏖️"
+            if layer["strata"] == "Sand"
+            else ("🧱" if layer["strata"] == "Clay" else "🪨")
         )
 
-      beta_r = j_val**0.45
-      Qu_rock_tons = (qc_ton_m2 * N_j * N_d * A_p) + (
-          qc_ton_m2 * math.pi * D * actual_ls * alpha_r * beta_r
-      )
-      Qu_rock_MN = Qu_rock_tons * 0.00980665
-      Qa_rock_MN = Qu_rock_MN / fos
+        with st.expander(
+            f"{icon} Layer {i+1}: {layer['strata']} ({layer['from']}m to"
+            f" {layer['to']}m)",
+            expanded=True,
+        ):
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.number_input(
+                    f"From Depth (m)",
+                    value=float(layer["from"]),
+                    disabled=True,
+                    key=f"from_{i}",
+                )
+            with c2:
+                layer["to"] = st.number_input(
+                    f"To Depth (m)",
+                    value=float(layer["to"]),
+                    min_value=float(layer["from"]) + 0.1,
+                    step=0.5,
+                    key=f"to_{i}",
+                )
+            with c3:
+                layer["strata"] = st.selectbox(
+                    f"Strata Type",
+                    ["Sand", "Clay", "Rock"],
+                    index=["Sand", "Clay", "Rock"].index(layer["strata"]),
+                    key=f"strata_{i}",
+                )
+            with c4:
+                st.write("")
+                st.write("")
+                if st.button(f"❌ Remove", key=f"del_{i}"):
+                    layers_to_delete.append(i)
 
-      rock_summary = {
-          'Rock Option': option_desc,
-          'Socket Length Taken ls (m)': actual_ls,
-          'qc - Compressive Strength (t/m²)': qc_ton_m2,
-          'Nj - Discontinuity Factor': N_j,
-          'Nd - Depth Factor': N_d,
-          'alpha_r - Socket Friction Factor': alpha_r,
-          'beta_r - Mass Factor': beta_r,
-          'Ultimate Rock Capacity Qu (MN)': Qu_rock_MN,
-          'Allowable Rock Capacity Qa (MN)': Qa_rock_MN,
-      }
-    else:
-      Cu2_calc = avg_ucs_mpa
-      Nc = 9.0
-      alpha_rock = 0.9
-      Qu_rock_MN = (Cu1_calc * Nc * A_p) + (
-          alpha_rock * Cu2_calc * math.pi * D * actual_ls
-      )
-      Qa_rock_MN = Qu_rock_MN / fos
+            if layer["strata"] == "Sand":
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    layer["submerged_unit_weight"] = st.number_input(
+                        "Submerged Unit Weight γ' (kN/m³)",
+                        value=float(layer.get("submerged_unit_weight", 10.0)),
+                        key=f"gamma_{i}",
+                    )
+                with sc2:
+                    layer["phi"] = st.number_input(
+                        "Internal Friction Angle ϕ (°)",
+                        value=float(layer.get("phi", 30.0)),
+                        key=f"phi_{i}",
+                    )
 
-      rock_summary = {
-          'Rock Option': option_desc,
-          'Socket Length Taken ls (m)': actual_ls,
-          'Cu1 - Base UCS (MPa)': Cu1_calc,
-          'Cu2 - Avg UCS (MPa)': Cu2_calc,
-          'Ultimate Rock Capacity Qu (MN)': Qu_rock_MN,
-          'Allowable Rock Capacity Qa (MN)': Qa_rock_MN,
-      }
+            elif layer["strata"] == "Clay":
+                cc1, cc2 = st.columns(2)
+                with cc1:
+                    layer["submerged_unit_weight"] = st.number_input(
+                        "Submerged Unit Weight γ' (kN/m³)",
+                        value=float(layer.get("submerged_unit_weight", 10.0)),
+                        key=f"gamma_c_{i}",
+                    )
+                with cc2:
+                    layer["Cu"] = st.number_input(
+                        "Unconfined Shear Strength Cu (kPa)",
+                        value=float(layer.get("Cu", 50.0)),
+                        key=f"cu_{i}",
+                    )
 
-  rock_df = pd.DataFrame([rock_summary]) if rock_summary else pd.DataFrame()
-  return soil_df, rock_df
+            elif layer["strata"] == "Rock":
+                rc1, rc2 = st.columns(2)
+                with rc1:
+                    rock_opts = [
+                        "1. Sound relatively homogenous rock (Granite, Gneiss)",
+                        "2. Moderately weathered, closely jointed (Schist, Slate)",
+                        "3. Soft rock / Sedimentary (Shale, Sandstone, Mudstone)",
+                    ]
+                    selected_opt = st.selectbox(
+                        "Rock Classification", rock_opts, key=f"rocktype_{i}"
+                    )
+                    layer["rock_type"] = int(selected_opt[0])
 
+                with rc2:
+                    layer["ucs_mpa"] = st.number_input(
+                        "Uniaxial Compressive Strength UCS (MPa)",
+                        value=float(layer.get("ucs_mpa", 15.0)),
+                        key=f"ucs_{i}",
+                    )
 
-# 3. LATERAL CAPACITY MODULE
-def get_h_from_n(n_val: float) -> float:
-  """Interpolates modulus of subgrade reaction constant (h) in kN/m3 from SPT-N value[cite: 7, 8, 9, 10]."""
-  n_pts = [0.0, 4.0, 10.0, 35.0, 50.0]
-  h_pts = [0.2, 0.2, 1.4, 5.0, 12.0]
-  if n_val <= 0:
-    h_base = 0.2
-  elif n_val >= 50:
-    h_base = 12.0
-  else:
-    h_base = float(np.interp(n_val, n_pts, h_pts))
-  return h_base * 1000.0 [cite: 9]
+                if layer["rock_type"] == 1:
+                    st.caption("⚙️ Option 1 Optional Properties")
+                    rc3, rc4, rc5, rc6 = st.columns(4)
+                    with rc3:
+                        layer["spacing_discontinuities"] = st.selectbox(
+                            "Discontinuity Spacing (mm)",
+                            [">300", "100-300", "30-100"],
+                            key=f"spacing_{i}",
+                        )
+                    with rc4:
+                        layer["rqd"] = st.number_input(
+                            "RQD (%)",
+                            value=80,
+                            min_value=0,
+                            max_value=100,
+                            key=f"rqd_{i}",
+                        )
+                    with rc5:
+                        ed_val = st.number_input(
+                            "In-situ Modulus Ed (MPa) (optional)",
+                            value=0.0,
+                            key=f"ed_{i}",
+                        )
+                        layer["Ed"] = ed_val if ed_val > 0 else None
+                    with rc6:
+                        ei_val = st.number_input(
+                            "Intact Modulus Ei (MPa) (optional)",
+                            value=0.0,
+                            key=f"ei_{i}",
+                        )
+                        layer["Ei"] = ei_val if ei_val > 0 else None
 
+    if layers_to_delete:
+        for index in sorted(layers_to_delete, reverse=True):
+            st.session_state["layers"].pop(index)
+        st.rerun()
 
-def get_k1_from_qu(qu_val: float) -> float:
-  """Interpolates subgrade reaction k1 in kN/m3 from qu (kPa)[cite: 14, 15, 16, 17]."""
-  qu_pts = [25.0, 50.0, 100.0, 200.0, 400.0, 800.0]
-  k1_pts = [4.5, 9.0, 18.0, 36.0, 72.0, 144.0]
-  if qu_val <= 25.0:
-    k1_base = 4.5
-  else:
-    k1_base = float(np.interp(qu_val, qu_pts, k1_pts))
-  return k1_base * 1000.0 [cite: 16]
+    st.write("")
 
+    col_b1, col_b2, _ = st.columns([1.3, 1.5, 3])
+    with col_b1:
+        if st.button("➕ Add Soil Layer", use_container_width=True):
+            last_to = (
+                st.session_state["layers"][-1]["to"]
+                if st.session_state["layers"]
+                else 0.0
+            )
+            st.session_state["layers"].append({
+                "from": last_to,
+                "to": last_to + 2.0,
+                "strata": "Sand",
+                "submerged_unit_weight": 10.0,
+                "phi": 30.0,
+                "Cu": 50.0,
+                "rock_type": 1,
+                "ucs_mpa": 10.0,
+                "spacing_discontinuities": ">300",
+                "rqd": 80,
+                "Ed": None,
+                "Ei": None,
+            })
+            st.rerun()
 
-def calculate_lateral_capacity(general_inputs: dict, lateral_inputs: dict):
-  """Computes Depth of Fixity (Zf/Lf), Lateral Load (H), and Moment (MF) per Word specifications[cite: 31, 33, 34, 37]."""
-  D = general_inputs['pile_diameter']
-  fck = lateral_inputs['fck'] [cite: 3]
-  L1 = lateral_inputs.get('L1', 0.0) [cite: 20, 25]
-  strata_type = lateral_inputs['strata_type']
-  delta_allow_mm = lateral_inputs.get('allowable_deflection_mm', 5.0)
-  delta_m = delta_allow_mm / 1000.0 [cite: 32]
+    with col_b2:
+        if st.button("🗑️ Clear All Layers", use_container_width=True):
+            st.session_state["layers"] = []
+            st.rerun()
 
-  # Pile Rigidity
-  E_c = 5000.0 * math.sqrt(fck) * 1000.0  # kN/m2 [cite: 3]
-  I_p = (math.pi * (D**4)) / 64.0  # m4 [cite: 4]
-  EI = E_c * I_p  # kN.m2 [cite: 5]
+    st.markdown("---")
 
-  # Head fixity condition
-  is_fixed = L1 == 0.0 [cite: 21, 26, 80]
-  head_condition = (
-      'Fixed Head (L1 = 0 m)' if is_fixed else f'Free Head (L1 = {L1:.2f} m)' [cite: 114]
-  )
+    if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
+        if not st.session_state["layers"]:
+            st.error(
+                "⚠️ Please add at least one soil/rock layer before running analysis."
+            )
+        else:
+            gen_inputs = {
+                "project_name": project_name if project_name else "N/A",
+                "project_location": project_location if project_location else "N/A",
+                "designer": designer_name if designer_name else "N/A",
+                "bh_number": bh_number if bh_number else "N/A",
+                "pile_diameter": pile_diameter,
+                "pile_area": pile_area,
+                "gw_depth": gw_depth,
+                "gamma_concrete": gamma_concrete,
+                "fos": fos,
+            }
 
-  if 'Sand' in strata_type:
-    N_val = lateral_inputs.get('avg_n_value', 15.0) [cite: 6]
-    eta_h = get_h_from_n(N_val)
-    T = (EI / eta_h) ** (1.0 / 5.0) [cite: 11]
-    x_ratio = L1 / T [cite: 20]
+            soil_df, rock_df = calculate_pile_capacity(
+                gen_inputs, st.session_state["layers"]
+            )
 
-    if is_fixed:
-      Lf_over_T = 1.85 + 0.35 * math.exp(-0.65 * x_ratio) [cite: 23]
-    else:
-      Lf_over_T = 1.76 + 0.14 * math.exp(-0.45 * x_ratio) [cite: 24]
+            total_soil_depth = (
+                soil_df["Depth (m)"].max() if not soil_df.empty else 0.0
+            )
+            soil_qu_comp = (
+                soil_df["Ultimate Bearing Resistance Qu (MN)"].iloc[-1]
+                if not soil_df.empty
+                else 0.0
+            )
+            soil_qa_comp = (
+                soil_df["Allowable Bearing Capacity Qa (MN)"].iloc[-1]
+                if not soil_df.empty
+                else 0.0
+            )
+            soil_qa_tens = (
+                soil_df["Allowable Capacity Qa Tens (MN)"].iloc[-1]
+                if not soil_df.empty
+                else 0.0
+            )
 
-    Zf = Lf_over_T * T [cite: 30, 33]
-    stiffness_name = 'Stiffness Factor T'
-    stiffness_val = T
-    subgrade_name = 'Modulus of Subgrade Reaction ηh'
-    subgrade_val = f'{eta_h:.1f} kN/m³'
-  else:
-    cu = lateral_inputs.get('cu_val_kpa', 50.0)
-    qu = 2.0 * cu [cite: 13]
-    k1 = get_k1_from_qu(qu)
-    K = (0.3 * k1) / (1.5 * D) [cite: 18]
-    R = (EI / (K * D)) ** (1.0 / 4.0) [cite: 19]
-    x_ratio = L1 / R [cite: 25]
+            st.markdown("### 📊 Performance Summary")
+            st.markdown("##### **1. Soil Capacity Summary**")
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Total Depth in Soil", f"{total_soil_depth:.2f} m")
+            s2.metric("Soil Ult. Compression (Qu)", f"{soil_qu_comp:.2f} MN")
+            s3.metric(
+                "Soil Allow. Compression (Qa)",
+                f"{soil_qa_comp:.2f} MN",
+                delta=f"FOS = {fos}",
+            )
+            s4.metric("Soil Allow. Tension (Qa)", f"{soil_qa_tens:.2f} MN")
 
-    if is_fixed:
-      Lf_over_R = 1.45 + 0.70 * math.exp(-0.62 * x_ratio) [cite: 28]
-    else:
-      Lf_over_R = 1.32 + 0.30 * math.exp(-0.52 * x_ratio) [cite: 29]
+            if not rock_df.empty:
+                st.write("")
+                st.markdown("##### **2. Rock Socket Capacity Summary**")
+                r1, r2, r3 = st.columns(3)
+                rock_ls = rock_df["Socket Length Taken ls (m)"].iloc[0]
+                rock_qu = rock_df["Ultimate Rock Capacity Qu (MN)"].iloc[0]
+                rock_qa = rock_df["Allowable Rock Capacity Qa (MN)"].iloc[0]
 
-    Zf = Lf_over_R * R [cite: 30, 33]
-    stiffness_name = 'Stiffness Factor R'
-    stiffness_val = R
-    subgrade_name = 'Modulus of Subgrade Reaction K'
-    subgrade_val = f'{K:.1f} kN/m³'
+                r1.metric("Socketed Depth in Rock", f"{rock_ls:.2f} m")
+                r2.metric("Rock Ult. Compression (Qu)", f"{rock_qu:.2f} MN")
+                r3.metric(
+                    "Rock Allow. Compression (Qa)",
+                    f"{rock_qa:.2f} MN",
+                    delta=f"FOS = {fos}",
+                )
 
-  Le = L1 + Zf [cite: 33, 35, 36, 114]
+            st.write("")
 
-  # Lateral Capacity & Moment
-  if is_fixed:
-    H_design_kN = (12.0 * EI * delta_m) / (Le**3) if Le > 0 else 0.0 [cite: 35, 115]
-    MF_kN_m = H_design_kN * Le [cite: 38]
-  else:
-    H_design_kN = (3.0 * EI * delta_m) / (Le**3) if Le > 0 else 0.0 [cite: 36, 115, 116]
-    MF_kN_m = (H_design_kN * Le) / 2.0 [cite: 39]
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📋 Capacity Results Table",
+                "📈 Depth vs Capacity Curves",
+                "🪨 Rock Socket Details",
+                "📄 Design Summary Report",
+            ])
 
-  lateral_summary = {
-      'Parameter': [
-          'Depth of Fixity, Zf', [cite: 82, 117]
-          'Permissible Deflection', [cite: 117]
-          'Lateral Load Capacity, H',
-          'Max Bending Moment, MF',
-          'Pile Head Condition', [cite: 117]
-          'Pile Diameter (D)', [cite: 117]
-          'Characteristic Strength (fck)', [cite: 117]
-          'Flexural Rigidity (EI)', [cite: 117]
-          subgrade_name,
-          stiffness_name,
-          'Free Standing Length (L1)', [cite: 117]
-          'Equivalent Cantilever Length (Le = L1 + Zf)', [cite: 117]
-      ],
-      'Value': [
-          f'{Zf:.3f} m', [cite: 118]
-          f'{delta_allow_mm:.1f} mm', [cite: 118]
-          f'{H_design_kN:.2f} kN', [cite: 118]
-          f'{MF_kN_m:.2f} kN·m',
-          head_condition, [cite: 118]
-          f'{D:.3f} m', [cite: 118]
-          f'{fck:.1f} N/mm²', [cite: 118]
-          f'{EI:.2f} kN·m²', [cite: 118]
-          subgrade_val,
-          f'{stiffness_val:.3f} m', [cite: 118]
-          f'{L1:.2f} m', [cite: 119]
-          f'{Le:.3f} m', [cite: 119]
-      ],
-  }
+            with tab1:
+                st.markdown("#### **Soil Layer-by-Layer Calculation Sheet**")
+                if not soil_df.empty:
+                    display_cols = [
+                        "Depth (m)",
+                        "Thickness (m)",
+                        "Strata",
+                        "Uncapped PD (kN/m²)",
+                        "Critical Height Hcr (m)",
+                        "Cumulative PD Lim (kN/m²)",
+                        "Effective Overburden Pressure PD (kN/m²)",
+                        "Skin Friction Qs (kN)",
+                        "End Bearing Resistance Qb (kN)",
+                        "Ultimate Bearing Resistance Qu (MN)",
+                        "Allowable Bearing Capacity Qa (MN)",
+                    ]
+                    st.dataframe(soil_df[display_cols], use_container_width=True)
+                else:
+                    st.info("No soil strata defined in the inputs.", icon="ℹ️")
 
-  lateral_df = pd.DataFrame(lateral_summary)
-  return lateral_df, Zf, H_design_kN, delta_allow_mm, head_condition, MF_kN_m
+                excel_bytes = generate_excel_report(
+                    gen_inputs, st.session_state["layers"], soil_df, rock_df
+                )
+                st.download_button(
+                    label="📥 Download Detailed Excel Report",
+                    data=excel_bytes,
+                    file_name=(
+                        f"Pile_Capacity_{bh_number if bh_number else 'Report'}.xlsx"
+                    ),
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    ),
+                )
 
+            with tab2:
+                st.markdown("#### **Performance Profile Graphs (Soil)**")
+                fig1, fig2, fig3 = create_plots(soil_df)
 
-def generate_excel_report(
-    general_inputs: dict,
-    layers: list,
-    soil_df: pd.DataFrame,
-    rock_df: pd.DataFrame,
-) -> bytes:
-  """Generates multi-sheet Excel file[cite: 68, 120]."""
-  output = io.BytesIO() [cite: 68, 120]
-  cleaned_layer_inputs = [] [cite: 68, 120]
-  for l in layers: [cite: 68, 120]
-    item = {
-        'From (m)': l.get('from'), [cite: 68, 120]
-        'To (m)': l.get('to'), [cite: 68, 120]
-        'Strata': l.get('strata'), [cite: 68, 120]
-    }
-    if l['strata'] in ['Sand', 'Clay']: [cite: 69, 120]
-      item['Submerged Unit Weight γ\' (kN/m³)'] = l.get(
-          'submerged_unit_weight', '' [cite: 69, 120]
-      )
-    if l['strata'] == 'Sand': [cite: 69, 121]
-      item['Phi (deg)'] = l.get('phi', '') [cite: 69, 121]
-    elif l['strata'] == 'Clay': [cite: 69, 121]
-      item['Cu (kPa)'] = l.get('Cu', '') [cite: 69, 121]
-    elif l['strata'] == 'Rock': [cite: 69, 121]
-      item['Rock Type'] = l.get('rock_type', '') [cite: 70, 121]
-      item['UCS (MPa)'] = l.get('ucs_mpa', '') [cite: 70, 121]
-    cleaned_layer_inputs.append(item) [cite: 70, 121]
+                g_col1, g_col2 = st.columns(2)
+                with g_col1:
+                    st.plotly_chart(fig1, use_container_width=True)
+                    st.plotly_chart(fig2, use_container_width=True)
+                with g_col2:
+                    st.plotly_chart(fig3, use_container_width=True)
 
-  with pd.ExcelWriter(output, engine='openpyxl') as writer: [cite: 70, 122]
-    pd.DataFrame([general_inputs]).to_excel( [cite: 70, 122]
-        writer, sheet_name='Sheet1_GeneralInputs', index=False [cite: 70, 122]
+            with tab3:
+                st.markdown("#### **Rock Socket Parameters & Capacity Summary**")
+                if not rock_df.empty:
+                    st.dataframe(
+                        rock_df.style.format(precision=3), use_container_width=True
+                    )
+                else:
+                    st.info("No rock strata identified in the inputs.", icon="ℹ️")
+
+            with tab4:
+                st.markdown("## 📄 Design Summary Report")
+                st.markdown("---")
+                st.markdown("### **PROJECT INFORMATION**")
+                st.markdown(f"* **Project:** {project_name if project_name else 'N/A'}")
+                st.markdown(
+                    f"* **Location:**"
+                    f" {project_location if project_location else 'N/A'}"
+                )
+                st.markdown(f"* **Borehole ID :** {bh_number if bh_number else 'N/A'}")
+                st.markdown(
+                    f"* **Designer:** {designer_name if designer_name else 'N/A'}"
+                )
+                st.markdown(
+                    f"* **Date :** {datetime.datetime.now().strftime('%d/%m/%Y')}"
+                )
+                st.markdown("* **Standard :** IS 2911 Part 1 Sec 2 and IS 14593 ")
+
+                st.markdown("---")
+                st.markdown("### **PILE PROPERTIES**")
+                st.markdown(f"* **Diameter (D):** {pile_diameter:.3f} m")
+                st.markdown(f"* **Cross-sectional Area (Ap):** {pile_area:.4f} m²")
+                st.markdown(f"* **Soil Depth Analyzed:** {total_soil_depth:.2f} m")
+                if not rock_df.empty:
+                    st.markdown(
+                        f"* **Rock Socket Length (ls):**"
+                        f" {rock_df['Socket Length Taken ls (m)'].iloc[0]:.2f} m"
+                    )
+                st.markdown("* **Type:** Bored Cast-in-situ Concrete Pile")
+                st.markdown(
+                    f"* **Concrete Unit Density:** {gamma_concrete:.1f} kN/m³"
+                )
+                st.markdown(f"* **Factor of Safety (FOS):** {fos}")
+
+                st.markdown("---")
+                st.markdown("### **STRATIGRAPHY PROFILE**")
+                st.markdown(
+                    f"* **Ground Water Depth:** {gw_depth:.2f} m (Took 0 m depth for"
+                    " calculations)"
+                )
+                st.markdown(
+                    f"* **Total Layers Input:** {len(st.session_state['layers'])}"
+                )
+                st.markdown("**Subsurface Layer Details:**")
+
+                for l_idx, l in enumerate(st.session_state["layers"]):
+                    strata_type = l["strata"]
+                    st.markdown(
+                        f"**{l_idx+1}. Layer {l_idx+1} ({strata_type.lower()})**"
+                    )
+                    st.markdown(f"  * **Depth:** {l['from']:.2f} - {l['to']:.2f} m")
+
+                    if strata_type in ["Sand", "Clay"]:
+                        st.markdown(
+                            f"  * **Submerged Unit Weight γ':**"
+                            f" {l.get('submerged_unit_weight', 0.0):.2f} kN/m³"
+                        )
+                    if strata_type == "Sand":
+                        st.markdown(
+                            f"  * **Internal Friction Angle (ϕ):** {l.get('phi', 0.0):.1f}°"
+                        )
+                    elif strata_type == "Clay":
+                        st.markdown(
+                            "  * **Unconfined Shear Strength (Cu):**"
+                            f" {l.get('Cu', 0.0):.1f} kPa"
+                        )
+                    elif strata_type == "Rock":
+                        st.markdown(f"  * **Rock Option:** {l.get('rock_type', 1)}")
+                        st.markdown(f"  * **UCS:** {l.get('ucs_mpa', 0.0):.2f} MPa")
+
+                st.markdown("---")
+                st.markdown("### **CAPACITY RESULTS SUMMARY**")
+
+                c_res1, c_res2 = st.columns(2)
+                with c_res1:
+                    st.markdown("#### **Soil Capacities**")
+                    st.markdown(
+                        f"* **Soil Ult. Compression Capacity (Qu):** {soil_qu_comp:.3f}"
+                        f" MN ({soil_qu_comp*1000:.1f} kN)"
+                    )
+                    st.markdown(
+                        f"* **Soil Allow. Compression Capacity (Qa):**"
+                        f" {soil_qa_comp:.3f} MN ({soil_qa_comp*1000:.1f} kN)"
+                    )
+                    st.markdown(
+                        f"* **Soil Allow. Tension Capacity (Qa):** {soil_qa_tens:.3f} MN"
+                        f" ({soil_qa_tens*1000:.1f} kN)"
+                    )
+
+                with c_res2:
+                    if not rock_df.empty:
+                        st.markdown("#### **Rock Socket Capacities**")
+                        st.markdown(
+                            f"* **Socket Length (ls):**"
+                            f" {rock_df['Socket Length Taken ls (m)'].iloc[0]:.2f} m"
+                        )
+
+                        if "qc - Compressive Strength (t/m²)" in rock_df.columns:
+                            st.markdown(
+                                f"* **qc (Compressive Strength):**"
+                                f" {rock_df['qc - Compressive Strength (t/m²)'].iloc[0]:.2f}"
+                                " t/m²"
+                            )
+                            if "Nj - Discontinuity Factor" in rock_df.columns:
+                                st.markdown(
+                                    f"* **Nj (Discontinuity Factor):**"
+                                    f" {rock_df['Nj - Discontinuity Factor'].iloc[0]:.3f}"
+                                )
+                            if "Nd - Depth Factor" in rock_df.columns:
+                                st.markdown(
+                                    f"* **Nd (Depth Factor):**"
+                                    f" {rock_df['Nd - Depth Factor'].iloc[0]:.3f}"
+                                )
+                            if "alpha_r - Socket Friction Factor" in rock_df.columns:
+                                st.markdown(
+                                    f"* **alpha_r (Socket Friction Factor):**"
+                                    f" {rock_df['alpha_r - Socket Friction Factor'].iloc[0]:.3f}"
+                                )
+                            if "beta_r - Mass Factor" in rock_df.columns:
+                                st.markdown(
+                                    f"* **beta_r (Mass Factor):**"
+                                    f" {rock_df['beta_r - Mass Factor'].iloc[0]:.3f}"
+                                )
+                        elif "Cu1 - Base UCS (MPa)" in rock_df.columns:
+                            st.markdown(
+                                f"* **Cu1 (Base UCS):**"
+                                f" {rock_df['Cu1 - Base UCS (MPa)'].iloc[0]:.2f} MPa"
+                            )
+                            st.markdown(
+                                f"* **Cu2 (Avg UCS):**"
+                                f" {rock_df['Cu2 - Avg UCS (MPa)'].iloc[0]:.2f} MPa"
+                            )
+
+                        qu_val = (
+                            rock_df["Ultimate Rock Capacity Qu (MN)"].iloc[0]
+                            if "Ultimate Rock Capacity Qu (MN)" in rock_df.columns
+                            else 0.0
+                        )
+                        qa_val = (
+                            rock_df["Allowable Rock Capacity Qa (MN)"].iloc[0]
+                            if "Allowable Rock Capacity Qa (MN)" in rock_df.columns
+                            else 0.0
+                        )
+                        st.markdown(f"* **Rock Ult. Capacity (Qu):** {qu_val:.3f} MN")
+                        st.markdown(f"* **Rock Allow. Capacity (Qa):** {qa_val:.3f} MN")
+                    else:
+                        st.markdown("#### **Rock Socket Capacities**")
+                        st.markdown("*No rock strata evaluated.*")
+
+# ==============================================================================
+# 2. LATERAL CAPACITY WORKFLOW
+# ==============================================================================
+else:
+    st.markdown(
+        """
+        <div class="hero-banner">
+            <h1>Lateral Pile Capacity</h1>
+            <p>Analysis of lateral load capacity and deflection as per IS 2911 Part 1 Sec 2</p>
+            <span class="badge">IS 2911:2010</span>
+            <span class="badge">Lateral Analysis</span>
+        </div>
+    """,
+        unsafe_allow_html=True,
     )
-    pd.DataFrame(cleaned_layer_inputs).to_excel( [cite: 70, 122]
-        writer, sheet_name='Sheet1_LayerInputs', index=False [cite: 70, 122]
-    )
-    if not soil_df.empty: [cite: 70, 122]
-      soil_df.to_excel(writer, sheet_name='Sheet2_SoilResults', index=False) [cite: 70, 122]
-    if not rock_df.empty: [cite: 71, 122]
-      rock_df.to_excel(writer, sheet_name='Sheet3_RockAnalysis', index=False) [cite: 71, 122]
 
-  return output.getvalue() [cite: 71, 122]
+    st.markdown("### 📋 Strata Parameters for Lateral Analysis")
 
-
-def create_plots(soil_df: pd.DataFrame):
-  """Generates Plotly graphs for soil performance profile starting exactly from (0, 0)[cite: 71, 122]."""
-  if soil_df.empty: [cite: 71, 122]
-    empty_fig = go.Figure() [cite: 71, 122]
-    return empty_fig, empty_fig, empty_fig [cite: 78, 123]
-
-  # Prepend depth = 0 for continuous plotting from origin
-  max_d = float(soil_df['Depth (m)'].max())
-  max_depth_limit = max_d * 1.05 if max_d > 0 else 10.0
-
-  depth_pts = [0.0] + soil_df['Depth (m)'].tolist()
-  skin_pts = [0.0] + soil_df['Unit Skin Friction (kPa)'].tolist()
-  qb_pts = [0.0] + soil_df['End Bearing Resistance Qb (kN)'].tolist()
-  qu_comp_pts = [0.0] + soil_df['Ultimate Bearing Resistance Qu (MN)'].tolist()
-  qu_tens_pts = [0.0] + soil_df['Ultimate Capacity Qu Tens (MN)'].tolist()
-
-  def apply_chart_borders(fig, title, x_label):
-    fig.update_layout(
-        title=dict(
-            text=f'<b>{title}</b>', [cite: 72, 124]
-            x=0.5, [cite: 72, 124]
-            xanchor='center', [cite: 72, 124]
-            y=0.01, [cite: 72, 124]
-            yanchor='bottom', [cite: 72, 124]
-            font=dict(size=14, color='#1e3c72'), [cite: 72, 124]
-        ),
-        yaxis_title='Depth in Soil (m)', [cite: 72, 124]
-        plot_bgcolor='white', [cite: 73, 124]
-        margin=dict(l=50, r=40, t=50, b=65), [cite: 73, 125]
-    )
-    fig.update_xaxes(
-        title=dict(text=x_label, font=dict(size=12)), [cite: 73, 126]
-        side='top', [cite: 73, 126]
-        rangemode='tozero',  # Forces X-axis to start at 0
-        showline=True, [cite: 73, 126]
-        linewidth=1.5, [cite: 74, 126]
-        linecolor='black', [cite: 74, 126]
-        mirror=True, [cite: 74, 126]
-        gridcolor='#f0f0f0', [cite: 74, 126]
-    )
-    fig.update_yaxes(
-        range=[
-            max_depth_limit,
-            0.0,
-        ],  # Forces Y-axis to start at 0 at the top (soil depth)
-        showline=True, [cite: 74, 126]
-        linewidth=1.5, [cite: 74, 126]
-        linecolor='black', [cite: 75, 126]
-        mirror=True, [cite: 75, 126]
-        gridcolor='#f0f0f0', [cite: 75, 126]
+    strata_option = st.selectbox(
+        "Type of strata Considered:", ["1. Sand and NC Clays", "2. OC Clays"]
     )
 
-  fig1 = go.Figure() [cite: 75, 126]
-  fig1.add_trace(
-      go.Scatter(
-          x=skin_pts,
-          y=depth_pts,
-          mode='lines+markers', [cite: 75, 127]
-          name='Unit Skin Friction', [cite: 75, 127]
-          line=dict(color='#1e3c72', width=2), [cite: 75, 127]
-      )
-  )
-  apply_chart_borders(
-      fig1, 'Unit Skin Friction vs Depth', 'Unit Skin Friction (kPa)' [cite: 75, 127]
-  )
+    col_l1, col_l2 = st.columns(2)
 
-  fig2 = go.Figure() [cite: 76, 127]
-  fig2.add_trace(
-      go.Scatter(
-          x=qb_pts,
-          y=depth_pts,
-          mode='lines+markers', [cite: 76, 128]
-          name='End Bearing (Qb)', [cite: 76, 128]
-          line=dict(color='#ff7f0e', width=2), [cite: 76, 128]
-      )
-  )
-  apply_chart_borders(
-      fig2, 'Ultimate End Bearing Resistance vs Depth', 'Qb (kN)' [cite: 76, 128]
-  )
+    with col_l1:
+        if strata_option == "1. Sand and NC Clays":
+            avg_n_value = st.number_input(
+                "Average N value",
+                min_value=1.0,
+                max_value=100.0,
+                value=15.0,
+                step=1.0,
+            )
+            cu_val_kpa = 0.0
+        else:
+            cu_val_kpa = st.number_input(
+                "Cu in kPa",
+                min_value=1.0,
+                max_value=1000.0,
+                value=50.0,
+                step=5.0,
+            )
+            avg_n_value = 0.0
 
-  fig3 = go.Figure() [cite: 76, 128]
-  fig3.add_trace(
-      go.Scatter(
-          x=qu_comp_pts,
-          y=depth_pts,
-          mode='lines+markers', [cite: 77, 128]
-          name='Compression (Qu)', [cite: 77, 129]
-          line=dict(color='#2ca02c', width=2), [cite: 77, 129]
-      )
-  )
-  fig3.add_trace(
-      go.Scatter(
-          x=qu_tens_pts,
-          y=depth_pts,
-          mode='lines+markers', [cite: 77, 129]
-          name='Tension (Qu)', [cite: 77, 129]
-          line=dict(color='#d62728', width=2, dash='dash'), [cite: 77, 129]
-      )
-  )
-  apply_chart_borders(
-      fig3, 'Ultimate Soil Pile Capacity vs Depth', 'Capacity (MN)' [cite: 77, 129]
-  )
+    with col_l2:
+        fck = st.number_input(
+            "Characteristic strength of concrete, fck in (N/mm²) e.g. M40",
+            min_value=15.0,
+            max_value=100.0,
+            value=40.0,
+            step=5.0,
+        )
+        l1_val = st.number_input(
+            "Free standing length of the pile above ground, L1 in m",
+            min_value=0.0,
+            value=0.0,
+            step=0.5,
+        )
 
-  return fig1, fig2, fig3 [cite: 78, 129]
+    allowable_deflection_mm = st.number_input(
+        "Allowable deflection in mm",
+        min_value=0.1,
+        max_value=50.0,
+        value=5.0,
+        step=0.5,
+    )
+
+    st.markdown("---")
+
+    if st.button("⚡ Run Analysis", type="primary", use_container_width=True):
+        gen_inputs = {"pile_diameter": pile_diameter, "fos": fos}
+
+        lat_inputs = {
+            "fck": fck,
+            "L1": l1_val,
+            "strata_type": strata_option,
+            "avg_n_value": avg_n_value,
+            "cu_val_kpa": cu_val_kpa,
+            "allowable_deflection_mm": allowable_deflection_mm,
+        }
+
+        lateral_df, zf, h_design, delta_disp, head_type, mf_design = (
+            calculate_lateral_capacity(gen_inputs, lat_inputs)
+        )
+
+        st.markdown("### 📊 Performance Summary (Lateral Capacity)")
+        lp1, lp2, lp3, lp4 = st.columns(4)
+        lp1.metric("Depth of fixity, Zf", f"{zf:.3f} m")
+        lp2.metric("Permissible deflection", f"{delta_disp:.1f} mm")
+        lp3.metric(f"Lateral load ({head_type})", f"{h_design:.2f} kN")
+        lp4.metric("Max Moment (MF)", f"{mf_design:.2f} kN·m")
+
+        st.write("")
+
+        tab_lat1, tab_lat2 = st.tabs(
+            ["📋 Lateral Capacity Results", "📄 Lateral Summary Report"]
+        )
+
+        with tab_lat1:
+            st.markdown(
+                "#### **Lateral Analysis Output Table (IS 2911 Part 1 Sec 2)**"
+            )
+            st.dataframe(lateral_df, use_container_width=True, hide_index=True)
+
+        with tab_lat2:
+            st.markdown("## 📄 Lateral Design Summary Report")
+            st.markdown("---")
+            st.markdown(f"* **Project:** {project_name if project_name else 'N/A'}")
+            st.markdown(
+                f"* **Location:** {project_location if project_location else 'N/A'}"
+            )
+            st.markdown(f"* **Borehole ID:** {bh_number if bh_number else 'N/A'}")
+            st.markdown(f"* **Designer:** {designer_name if designer_name else 'N/A'}")
+            st.markdown(
+                f"* **Date:** {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            )
+            st.markdown("---")
+            st.markdown("### **KEY RESULTS**")
+            st.markdown(f"* **Depth of fixity, Zf:** `{zf:.3f} m`")
+            st.markdown(f"* **Permissible deflection:** `{delta_disp:.1f} mm`")
+            st.markdown(
+                f"* **Lateral load capacity, H ({head_type}):** `{h_design:.2f} kN`"
+            )
+            st.markdown(f"* **Max Fixed Moment, MF:** `{mf_design:.2f} kN·m`")
